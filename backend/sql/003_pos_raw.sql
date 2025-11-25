@@ -1,10 +1,10 @@
 -- 003_pos_raw.sql
--- Сырые события и документы SetPrisma v3 / Frontol Video API
+-- Сырые события и документы SetPrisma v3
 
 CREATE TABLE IF NOT EXISTS pos_events (
     id              BIGSERIAL PRIMARY KEY,
     source          TEXT NOT NULL,           -- 'setretail10', 'frontol6' и т.п.
-    prefix          TEXT,                    -- ККМ / SSC / ...
+    prefix          TEXT,
     shop            INTEGER,
     device          INTEGER,
     code            INTEGER,                 -- Код события (4,5,6,18,25,37...)
