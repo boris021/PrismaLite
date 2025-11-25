@@ -7,8 +7,7 @@ from typing import List, Dict, Any, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 
-# Используем тот же DSN, что и в других модулях.
-# Если он у тебя уже задан в .env / docker-compose — просто подгони переменную.
+# DSN: лучше потом заменить на тот, что уже используешь в проекте (из .env / docker-compose)
 DB_DSN = os.getenv(
     "DATABASE_URL",
     "dbname=prismalite user=postgres password=postgres host=localhost",
@@ -22,11 +21,11 @@ class EventEngine:
     def _connect(self):
         return psycopg2.connect(self.dsn, cursor_factory=RealDictCursor)
 
-    # ===== ПУБЛИЧНЫЙ ВХОД =====
+    # ===== ПУБЛИЧНЫЕ ВХОДЫ =====
 
     def run_for_period(self, date_from: dt.datetime, date_to: dt.datetime) -> None:
         """
-        Основной вход: пройтись по чекам за период и сгенерировать события.
+        Основной запуск: пройтись по чекам за период и сгенерировать события.
         Это можно дергать из cron / systemd-таймера.
         """
         with self._connect() as conn, conn.cursor() as cur:
@@ -47,27 +46,26 @@ class EventEngine:
 
     def run_for_receipt(self, receipt_id: int) -> None:
         """
-        Помощник: пересчитать события для одного конкретного чека.
-        Удобно для дебага.
+        Вспомогательный метод:
+        пересчитать события для одного чека по id.
+        Удобно для отладки.
         """
         with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT * FROM receipts WHERE id = %s",
-                (receipt_id,),
-            )
+            cur.execute("SELECT * FROM receipts WHERE id = %s", (receipt_id,))
             receipt = cur.fetchone()
             if not receipt:
+                print(f"[WARN] receipt {receipt_id} not found")
                 return
             self.process_receipt(conn, receipt)
 
-    # ===== ОСНОВНАЯ ЛОГИКА НА ОДИН ЧЕК =====
+    # ===== ОСНОВНАЯ ЛОГИКА =====
 
     def process_receipt(self, conn, receipt: Dict[str, Any]) -> None:
         """
         Обработка одного чека:
-        - вытащить позиции
-        - прогнать через набор правил
-        - записать события в таблицу events (без дублей)
+        - читаем позиции
+        - прогоняем через набор правил
+        - пишем события в events
         """
         receipt_id = receipt["id"]
 
@@ -96,17 +94,19 @@ class EventEngine:
             events.extend(self._rule_no_scan_sale(pos))
             events.extend(self._rule_discount_over_limit(pos))
 
-        # Запись в БД
         self._insert_events(conn, receipt_id, events)
 
-    # ===== ПРАВИЛА (по минимуму, дальше будем расширять) =====
+    # ===== ПРАВИЛА =====
 
     def _rule_void(self, pos: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        VOID — удалённая позиция.
+        Сейчас: считаем void, если count <= 0 или есть is_void.
+        Поля подгони под свою схему (is_void, count и т.д.).
+        """
         events: List[Dict[str, Any]] = []
 
-        # ⚠️ Подгони под реальные поля из receipt_positions:
-        # есть ли у тебя флаг is_void / deleted / void_flag ?
-        is_void = bool(pos.get("is_void")) or pos.get("count") == 0
+        is_void = bool(pos.get("is_void")) or (pos.get("count") is not None and pos.get("count") <= 0)
 
         if is_void:
             events.append({
@@ -115,7 +115,7 @@ class EventEngine:
                 "position_id": pos["id"],
                 "details": {
                     "rule": "VOID",
-                    "reason": "position_marked_void",
+                    "reason": "position_marked_void_or_zero_count",
                     "goods_code": pos.get("goods_code"),
                     "bar_code": pos.get("bar_code"),
                     "cost": pos.get("cost"),
@@ -124,10 +124,12 @@ class EventEngine:
         return events
 
     def _rule_return(self, receipt: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        RETURN — чек возврата.
+        В JSON у тебя было operation_type: true/false.
+        """
         events: List[Dict[str, Any]] = []
 
-        # В JSON у тебя был operation_type: true/false
-        # В БД могли назвать operation_type (boolean) или operation_type_bool и т.п.
         operation_type = receipt.get("operation_type")
 
         if operation_type is False:
@@ -147,9 +149,12 @@ class EventEngine:
         return events
 
     def _rule_manual_price(self, pos: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        MANUAL_PRICE — ручная цена.
+        insert_type = 2 (или аналог) — нужно будет подстроить под реальное поле.
+        """
         events: List[Dict[str, Any]] = []
 
-        # insert_type = 2 -> ручной ввод цены
         if pos.get("insert_type") == 2:
             events.append({
                 "event_type": "MANUAL_PRICE",
@@ -165,9 +170,13 @@ class EventEngine:
         return events
 
     def _rule_weight_anomaly(self, pos: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        WEIGHT_ANOMALY — аномалия по весу.
+        Требуются поля: is_weight, weight, cost, amount.
+        Если их нет — правило тихо ничего не создаёт.
+        """
         events: List[Dict[str, Any]] = []
 
-        # Подстрой под свои поля: is_weight, weight, cost, amount и т.д.
         if not pos.get("is_weight", False):
             return events
 
@@ -194,9 +203,13 @@ class EventEngine:
         return events
 
     def _rule_no_scan_sale(self, pos: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        NO_SCAN_SALE — продажа без сканера.
+        Нужен флаг manual_entry / input_mode.
+        Если его нет — правило не срабатывает.
+        """
         events: List[Dict[str, Any]] = []
 
-        # Нужен флаг "manual_entry" / "input_mode".
         manual_entry = bool(pos.get("manual_entry"))
 
         if manual_entry:
@@ -213,14 +226,17 @@ class EventEngine:
         return events
 
     def _rule_discount_over_limit(self, pos: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        DISCOUNT_OVER_LIMIT — скидка выше лимита.
+        Требуются discount_percent / discount_amount, иначе просто ничего не делаем.
+        """
         events: List[Dict[str, Any]] = []
 
         discount_percent = float(pos.get("discount_percent") or 0)
         discount_amount = float(pos.get("discount_amount") or 0)
 
-        # TODO: потом вынесем в таблицу настроек / rules
-        limit_percent = 20.0
-        limit_amount = 1000.0
+        limit_percent = 20.0   # TODO: вынести в БД
+        limit_amount = 1000.0  # TODO: вынести в БД
 
         if discount_percent > limit_percent or discount_amount > limit_amount:
             events.append({
@@ -252,7 +268,7 @@ class EventEngine:
             for ev in events:
                 pos_id: Optional[int] = ev["position_id"]
 
-                # Простейшая защита от дублей:
+                # Простая защита от дублей:
                 cur.execute(
                     """
                     SELECT 1
@@ -285,11 +301,13 @@ class EventEngine:
 
 
 if __name__ == "__main__":
-    # Пример: обработать последние 60 минут
     engine = EventEngine()
 
+    # пример: обработать последние 60 минут по sale_time
     now = dt.datetime.now(dt.timezone.utc)
     date_to = now
     date_from = now - dt.timedelta(minutes=60)
 
+    print(f"[INFO] Running EventEngine from {date_from} to {date_to}")
     engine.run_for_period(date_from, date_to)
+    print("[INFO] Done")
