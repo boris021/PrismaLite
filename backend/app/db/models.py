@@ -1,5 +1,5 @@
-from typing import Optional, Dict, Any
-from datetime import datetime
+from typing import Optional, Dict, Any, List
+from datetime import datetime, date
 
 from .connection import get_connection, jsonb
 
@@ -73,6 +73,30 @@ def get_event_type_id(cur, event_code: int) -> int:
     return row[0]
 
 
+def parse_iso_datetime(value: Any) -> datetime:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    raise ValueError(f"invalid datetime: {value!r}")
+
+
+def parse_iso_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    raise ValueError(f"invalid date: {value!r}")
+
+
+# ============================
+#  ВСТАВКА СОБЫТИЯ
+# ============================
+
 def insert_event(edr: Dict[str, Any]) -> int:
     """
     Принимает один EDR-словарь и вставляет строку в prismalite.events.
@@ -101,14 +125,7 @@ def insert_event(edr: Dict[str, Any]) -> int:
     if occurred_at is None:
         raise ValueError("event.occurred_at is required")
 
-    # Приводим occurred_at к datetime
-    if isinstance(occurred_at, str):
-        # FastAPI/Pydantic может сам конвертировать, но здесь для надёжности
-        occurred_at_dt = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-    elif isinstance(occurred_at, datetime):
-        occurred_at_dt = occurred_at
-    else:
-        raise ValueError("event.occurred_at must be ISO8601 string or datetime")
+    occurred_at_dt = parse_iso_datetime(occurred_at)
 
     cashier_external_id = cashier_block.get("external_id")
 
@@ -117,7 +134,7 @@ def insert_event(edr: Dict[str, Any]) -> int:
         raw_source = "agent"
 
     raw_line = raw_block.get("line")
-    correlation_id = receipt_block.get("number")  # временно используем номер чека как correlation_id
+    correlation_id = receipt_block.get("number")  # используем номер чека
 
     conn = get_connection()
     try:
@@ -165,5 +182,139 @@ def insert_event(edr: Dict[str, Any]) -> int:
                 )
                 event_id = cur.fetchone()[0]
         return event_id
+    finally:
+        conn.close()
+
+
+# ============================
+#  ВСТАВКА ЧЕКА + ПОЗИЦИЙ
+# ============================
+
+def insert_receipt_with_items(edr_receipt: Dict[str, Any]) -> int:
+    """
+    Принимает структуру чека (см. JSON формат) и создаёт:
+    - запись в prismalite.receipts
+    - записи в prismalite.receipt_items
+    - линкует events.receipt_id по store/till/receipt.number
+    Возвращает id чека.
+    """
+    store_block = edr_receipt.get("store") or {}
+    till_block = edr_receipt.get("till") or {}
+    cashier_block = edr_receipt.get("cashier") or {}
+    receipt_block = edr_receipt.get("receipt") or {}
+
+    store_code = store_block.get("code")
+    if not store_code:
+        raise ValueError("store.code is required")
+
+    till_code = till_block.get("code")
+    if not till_code:
+        raise ValueError("till.code is required")
+
+    receipt_number = receipt_block.get("number")
+    if not receipt_number:
+        raise ValueError("receipt.number is required")
+
+    operation_type = receipt_block.get("operation_type", "SALE")
+    business_date = parse_iso_date(receipt_block.get("business_date"))
+    opened_at = parse_iso_datetime(receipt_block.get("opened_at")) if receipt_block.get("opened_at") else None
+    closed_at = parse_iso_datetime(receipt_block.get("closed_at")) if receipt_block.get("closed_at") else None
+    total_amount = receipt_block.get("total_amount")
+
+    items: List[Dict[str, Any]] = receipt_block.get("items") or []
+    cashier_external_id = cashier_block.get("external_id")
+
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                store_id = get_or_create_store(cur, store_code)
+                till_id = get_or_create_till(cur, store_id, till_code)
+                cashier_id = get_or_create_cashier(cur, cashier_external_id)
+
+                # создаём чек
+                cur.execute(
+                    """
+                    INSERT INTO prismalite.receipts (
+                        store_id,
+                        till_id,
+                        cashier_id,
+                        number,
+                        operation_type,
+                        business_date,
+                        opened_at,
+                        closed_at,
+                        total_amount
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING id
+                    """,
+                    (
+                        store_id,
+                        till_id,
+                        cashier_id,
+                        receipt_number,
+                        operation_type,
+                        business_date,
+                        opened_at,
+                        closed_at,
+                        total_amount,
+                    ),
+                )
+                receipt_id = cur.fetchone()[0]
+
+                # создаём позиции чека
+                for idx, item in enumerate(items, start=1):
+                    line_number = item.get("line_number", idx)
+                    barcode = item.get("barcode")
+                    sku = item.get("sku")
+                    name = item.get("name")
+                    quantity = item.get("quantity")
+                    price = item.get("price")
+                    amount = item.get("amount")
+                    vat_rate = item.get("vat_rate")
+
+                    cur.execute(
+                        """
+                        INSERT INTO prismalite.receipt_items (
+                            receipt_id,
+                            line_number,
+                            barcode,
+                            sku,
+                            name,
+                            quantity,
+                            price,
+                            amount,
+                            vat_rate
+                        )
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        """,
+                        (
+                            receipt_id,
+                            line_number,
+                            barcode,
+                            sku,
+                            name,
+                            quantity,
+                            price,
+                            amount,
+                            vat_rate,
+                        ),
+                    )
+
+                # линкуем события по номеру чека (correlation_id)
+                cur.execute(
+                    """
+                    UPDATE prismalite.events
+                    SET receipt_id = %s
+                    WHERE store_id = %s
+                      AND till_id = %s
+                      AND correlation_id = %s
+                      AND receipt_id IS NULL
+                    """,
+                    (receipt_id, store_id, till_id, receipt_number),
+                )
+
+        return receipt_id
     finally:
         conn.close()
