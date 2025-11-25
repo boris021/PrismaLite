@@ -1,19 +1,15 @@
-from pydantic import BaseSettings, AnyHttpUrl
+# backend/app/core/config.py
+from pydantic import BaseSettings
 
 
 class SetRetailConfig(BaseSettings):
-    # IP сервера SetRetail (тот где крутится SOAP ERPIntegration)
-    host: str = "192.168.50.90"
-
-    # Порт ERPIntegration (по документации 8090)
-    port: int = 8090
-
-    # Относительный путь сервиса
-    # В документации: /SET-ERPIntegration/FiscalInfoExport
+    """
+    Настройки подключения к SOAP-сервису SetRetail.
+    """
+    host: str = "192.168.50.90"       # IP сервера SetRetail
+    port: int = 8090                  # порт ERPIntegration
     path: str = "/SET-ERPIntegration/FiscalInfoExport"
-
-    # Таймауты
-    request_timeout_sec: int = 10
+    request_timeout_sec: int = 10     # таймаут SOAP-запросов
 
     class Config:
         env_prefix = "PRISMALITE_SETRETAIL_"
@@ -21,6 +17,10 @@ class SetRetailConfig(BaseSettings):
 
 
 class AppConfig(BaseSettings):
+    """
+    Общие настройки приложения PrismaLite.
+    При необходимости сюда добавим БД, JWT и т.д.
+    """
     setretail: SetRetailConfig = SetRetailConfig()
 
     class Config:
