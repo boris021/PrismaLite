@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<purchases count="3">
+    <purchase tabNumber="23" userName="Тасмагамбетова Айнур Маратовна" operationType="true" cashOperation="INCOME" operDay="2025-11-25+05:00" shop="350" cash="2" shift="927" number="110" saletime="2025-11-25T19:43:15.699+05:00" begintime="2025-11-25T19:24:49.895+05:00" amount="1981.00" discountAmount="0.00" inn="230240034860" fiscalDocNum="237754;110">
+        <plugin-property key="PROMO_PRINT_DISABLED" value="true"/>
+        <plugin-property key="FISCAL_DOC_ID" value="237754"/>
+        <plugin-property key="FN_DOC_NUM_IN_SHIFT" value="110"/>
+        <plugin-property key="CASHIER_NAME" value="Тасмагамбетова Айнур Маратовна"/>
+        <plugin-property key="UID_PURCHASE" value="95180aa4-da9d-477b-8bd2-c9ec129acb6f"/>
+        <plugin-property key="CASH_TIME_ZONE" value="+05:00"/>
+        <plugin-property key="fiscalbarcode" value="http://consumer.oofd.kz?i=1347866654&amp;f=010102742790&amp;s=1981.00&amp;t=20251125T194311"/>
+        <plugin-property key="rs.loyalty.receipt.uid" value="00350002-0927-0001-1001-764080689895"/>
+        <positions>
+            <position order="2" departNumber="1" goodsCode="12134" barCode="2007736" count="0.296" cost="1130.00" nds="12.0" ndsSum="35.79" discountValue="0.00" costWithDiscount="1130.00" amount="334.00" dateCommit="2025-11-25T19:25:28.687+05:00" insertType="0">
+                <plugin-property key="isWeightScanned" value="true"/>
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="11"/>
+                <plugin-property key="minimalPrice" value="-1"/>
+            </position>
+            <position order="4" departNumber="1" goodsCode="13935" barCode="2118000070669" count="2.000" cost="119.00" nds="12.0" ndsSum="25.50" discountValue="0.00" costWithDiscount="119.00" amount="238.00" dateCommit="2025-11-25T19:43:09.559+05:00" insertType="0">
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="0"/>
+                <plugin-property key="minimalPrice" value="-1"/>
+            </position>
+            <position order="1" departNumber="1" goodsCode="3172" barCode="4870004710795" count="1.000" cost="570.00" nds="12.0" ndsSum="61.07" discountValue="0.00" costWithDiscount="570.00" amount="570.00" dateCommit="2025-11-25T19:25:25.515+05:00" insertType="0">
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="0"/>
+                <plugin-property key="minimalPrice" value="-1"/>
+            </position>
+            <position order="3" departNumber="1" goodsCode="47055" barCode="2000268" count="0.252" cost="3330.00" nds="12.0" ndsSum="89.89" discountValue="0.00" costWithDiscount="3330.00" amount="839.00" dateCommit="2025-11-25T19:25:40.971+05:00" insertType="0">
+                <plugin-property key="isWeightScanned" value="true"/>
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="11"/>
+                <plugin-property key="minimalPrice" value="-1"/>
+            </position>
+        </positions>
+        <payments>
+            <payment order="0" typeClass="BankCardPaymentEntity" amount="1981.00" description="Оплата банковской картой">
+                <plugin-property key="card.hash"/>
+                <plugin-property key="terminal.number"/>
+                <plugin-property key="cash.transaction.id" value="260550"/>
+                <plugin-property key="cash.transaction.date" value="2025-11-25 19:43:11.045"/>
+                <plugin-property key="code" value="bank"/>
+                <plugin-property key="bank.id" value="Оплата по банку"/>
+                <plugin-property key="ref.number"/>
+                <plugin-property key="subclass" value="Оплата по банку"/>
+                <plugin-property key="auth.code"/>
+                <plugin-property key="card.type" value="2"/>
+                <plugin-property key="bank.type" value="UNKNOWN"/>
+                <plugin-property key="card.number"/>
+            </payment>
+        </payments>
+    </purchase>
+    <purchase tabNumber="23" userName="Тасмагамбетова Айнур Маратовна" operationType="true" cashOperation="INCOME" operDay="2025-11-25+05:00" shop="350" cash="1" shift="950" number="413" saletime="2025-11-25T19:44:00.449+05:00" begintime="2025-11-25T19:43:13.892+05:00" amount="4033.00" discountAmount="0.00" inn="230240034860" fiscalDocNum="332197;413">
+        <plugin-property key="PROMO_PRINT_DISABLED" value="true"/>
+        <plugin-property key="FISCAL_DOC_ID" value="332197"/>
+        <plugin-property key="FN_DOC_NUM_IN_SHIFT" value="413"/>
+        <plugin-property key="CASHIER_NAME" value="Тасмагамбетова Айнур Маратовна"/>
+        <plugin-property key="UID_PURCHASE" value="663e5e53-340d-4671-89ab-02de5421816e"/>
+        <plugin-property key="CASH_TIME_ZONE" value="+05:00"/>
+        <plugin-property key="fiscalbarcode" value="http://consumer.oofd.kz?i=1300822432&amp;f=010102742789&amp;s=4033.00&amp;t=20251125T194357"/>
+        <plugin-property key="rs.loyalty.receipt.uid" value="00350001-0950-0004-1301-764081793892"/>
+        <positions>
+            <position order="4" departNumber="1" goodsCode="68967" barCode="48748513" count="1.000" cost="1070.00" nds="12.0" ndsSum="114.64" discountValue="0.00" costWithDiscount="1070.00" amount="1070.00" dateCommit="2025-11-25T19:43:32.177+05:00" insertType="0">
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="0"/>
+                <plugin-property key="minimalPrice" value="92000"/>
+            </position>
+            <position order="1" departNumber="1" goodsCode="2850" barCode="4870145004432" count="1.000" cost="1439.00" nds="12.0" ndsSum="154.18" discountValue="0.00" costWithDiscount="1439.00" amount="1439.00" dateCommit="2025-11-25T19:43:13.898+05:00" insertType="0">
+                <plugin-property key="alcoMinimalPrice" value="-1"/>
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="0"/>
+                <plugin-property key="minimalPrice" value="143900"/>
+            </position>
+            <position order="3" departNumber="1" goodsCode="4122" barCode="4607010740078" count="1.000" cost="100.00" nds="12.0" ndsSum="10.71" discountValue="0.00" costWithDiscount="100.00" amount="100.00" dateCommit="2025-11-25T19:43:31.128+05:00" insertType="0">
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="0"/>
+                <plugin-property key="minimalPrice" value="-1"/>
+            </position>
+            <position order="2" departNumber="1" goodsCode="8551" barCode="2006152" count="0.338" cost="4140.00" nds="12.0" ndsSum="149.89" discountValue="0.00" costWithDiscount="4140.00" amount="1399.00" dateCommit="2025-11-25T19:43:19.099+05:00" insertType="0">
+                <plugin-property key="isWeightScanned" value="true"/>
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="11"/>
+                <plugin-property key="minimalPrice" value="-1"/>
+            </position>
+            <position order="5" departNumber="1" goodsCode="2898" barCode="2100872960926" count="1.000" cost="25.00" nds="12.0" ndsSum="2.68" discountValue="0.00" costWithDiscount="25.00" amount="25.00" dateCommit="2025-11-25T19:43:38.157+05:00" insertType="2">
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="0"/>
+                <plugin-property key="minimalPrice" value="-1"/>
+            </position>
+        </positions>
+        <payments>
+            <payment order="0" typeClass="BankCardPaymentEntity" amount="4033.00" description="Оплата банковской картой">
+                <plugin-property key="card.hash"/>
+                <plugin-property key="terminal.number"/>
+                <plugin-property key="cash.transaction.id" value="377065"/>
+                <plugin-property key="cash.transaction.date" value="2025-11-25 19:43:57.395"/>
+                <plugin-property key="code" value="bank"/>
+                <plugin-property key="bank.id" value="Оплата по банку"/>
+                <plugin-property key="ref.number"/>
+                <plugin-property key="subclass" value="Оплата по банку"/>
+                <plugin-property key="auth.code"/>
+                <plugin-property key="card.type" value="2"/>
+                <plugin-property key="bank.type" value="UNKNOWN"/>
+                <plugin-property key="card.number"/>
+            </payment>
+        </payments>
+    </purchase>
+    <purchase tabNumber="23" userName="Тасмагамбетова Айнур Маратовна" operationType="true" cashOperation="INCOME" operDay="2025-11-25+05:00" shop="350" cash="2" shift="927" number="111" saletime="2025-11-25T19:43:51.740+05:00" begintime="2025-11-25T19:43:29.594+05:00" amount="2826.00" discountAmount="0.00" inn="230240034860" fiscalDocNum="237755;111">
+        <plugin-property key="PROMO_PRINT_DISABLED" value="true"/>
+        <plugin-property key="FISCAL_DOC_ID" value="237755"/>
+        <plugin-property key="FN_DOC_NUM_IN_SHIFT" value="111"/>
+        <plugin-property key="CASHIER_NAME" value="Тасмагамбетова Айнур Маратовна"/>
+        <plugin-property key="UID_PURCHASE" value="e9c0a739-ade2-45a3-ad5d-cb83c4885987"/>
+        <plugin-property key="CASH_TIME_ZONE" value="+05:00"/>
+        <plugin-property key="fiscalbarcode" value="http://consumer.oofd.kz?i=1579582578&amp;f=010102742790&amp;s=2826.00&amp;t=20251125T194349"/>
+        <plugin-property key="rs.loyalty.receipt.uid" value="00350002-0927-0001-1101-764081809594"/>
+        <positions>
+            <position order="2" departNumber="1" goodsCode="31476" barCode="2000763" count="0.272" cost="1290.00" nds="12.0" ndsSum="37.61" discountValue="0.00" costWithDiscount="1290.00" amount="351.00" dateCommit="2025-11-25T19:43:33.614+05:00" insertType="0">
+                <plugin-property key="isWeightScanned" value="true"/>
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="11"/>
+                <plugin-property key="minimalPrice" value="-1"/>
+            </position>
+            <position order="1" departNumber="1" goodsCode="8606" barCode="2118000016063" count="2.000" cost="420.00" nds="12.0" ndsSum="90.00" discountValue="0.00" costWithDiscount="420.00" amount="840.00" dateCommit="2025-11-25T19:43:29.602+05:00" insertType="0">
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="0"/>
+                <plugin-property key="minimalPrice" value="-1"/>
+            </position>
+            <position order="3" departNumber="1" goodsCode="8647" barCode="4870145002728" count="3.000" cost="545.00" nds="12.0" ndsSum="175.18" discountValue="0.00" costWithDiscount="545.00" amount="1635.00" dateCommit="2025-11-25T19:43:42.208+05:00" insertType="0">
+                <plugin-property key="alcoMinimalPrice" value="-1"/>
+                <plugin-property key="salesTax" value="0"/>
+                <plugin-property key="ffdTag2108" value="0"/>
+                <plugin-property key="minimalPrice" value="-1"/>
+            </position>
+        </positions>
+        <payments>
+            <payment order="0" typeClass="BankCardPaymentEntity" amount="2826.00" description="Оплата банковской картой">
+                <plugin-property key="card.hash"/>
+                <plugin-property key="terminal.number"/>
+                <plugin-property key="cash.transaction.id" value="260555"/>
+                <plugin-property key="cash.transaction.date" value="2025-11-25 19:43:48.738"/>
+                <plugin-property key="code" value="bank"/>
+                <plugin-property key="bank.id" value="Оплата по банку"/>
+                <plugin-property key="ref.number"/>
+                <plugin-property key="subclass" value="Оплата по банку"/>
+                <plugin-property key="auth.code"/>
+                <plugin-property key="card.type" value="2"/>
+                <plugin-property key="bank.type" value="UNKNOWN"/>
+                <plugin-property key="card.number"/>
+            </payment>
+        </payments>
+    </purchase>
+</purchases>
