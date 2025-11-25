@@ -1,21 +1,33 @@
 import psycopg2
 from psycopg2.extras import Json
-from datetime import datetime, timedelta
+from datetime import datetime
 
+
+# ⚙️ Подключение к БД
+# ВАЖНО: Скопируй сюда тот же пароль, который у тебя стоит в scripts/convert_pos_documents.py
 DB = {
     "host": "localhost",
     "dbname": "prismalite",
     "user": "postgres",
-    "password": "postgres",  # <-- сюда твой пароль
+    "password": "postgres",  # ← ЗАМЕНИ на свой рабочий пароль
 }
 
-# Порог большой скидки (50%)
+# Порог «большой скидки» (50% и больше)
 BIG_DISCOUNT_RATIO = 0.5
+
+# Маппинг под ENUM event_severity (A/B/C)
+# См. в БД: SELECT * FROM pg_type WHERE typname = 'event_severity';
+SEVERITY_HIGH = "A"    # критичное
+SEVERITY_MEDIUM = "B"  # среднее
+SEVERITY_LOW = "C"     # информационное
 
 
 def get_connection():
+    """
+    Открываем соединение с автокоммитом,
+    чтобы не залипать в aborted-транзакциях.
+    """
     conn = psycopg2.connect(**DB)
-    # ВКЛЮЧАЕМ AUTOCOMMIT, чтобы не залипать в aborted-транзакции
     conn.autocommit = True
     return conn
 
@@ -23,13 +35,22 @@ def get_connection():
 def fetch_recent_receipts(cur, hours=24):
     """
     Берём чеки за последние N часов.
+    Под твою схему: receipts(id, shop, cash, shift, number, sale_time, amount, discount_amount, is_refund)
     """
     cur.execute(
         """
-        SELECT id, shop, cash, shift, number, sale_time, amount, discount_amount, is_refund
+        SELECT id,
+               shop,
+               cash,
+               shift,
+               number,
+               sale_time,
+               amount,
+               discount_amount,
+               is_refund
         FROM receipts
         WHERE sale_time >= now() - (%s || ' hours')::interval
-        ORDER BY sale_time DESC
+        ORDER BY sale_time DESC;
         """,
         (hours,),
     )
@@ -37,12 +58,24 @@ def fetch_recent_receipts(cur, hours=24):
 
 
 def fetch_positions_for_receipt(cur, receipt_id: int):
+    """
+    Позиции по чеку из receipt_positions.
+    Твоя схема: id, receipt_id, pos_order, goods_code, bar_code, count, cost, nds, is_void, raw_json
+    """
     cur.execute(
         """
-        SELECT id, pos_order, goods_code, bar_code, count, cost, nds, is_void, raw_json
+        SELECT id,
+               pos_order,
+               goods_code,
+               bar_code,
+               count,
+               cost,
+               nds,
+               is_void,
+               raw_json
         FROM receipt_positions
         WHERE receipt_id = %s
-        ORDER BY pos_order NULLS FIRST, id
+        ORDER BY pos_order NULLS FIRST, id;
         """,
         (receipt_id,),
     )
@@ -50,19 +83,27 @@ def fetch_positions_for_receipt(cur, receipt_id: int):
 
 
 def clear_events_for_receipts(cur, receipt_ids):
+    """
+    Чистим старые события по этим чекам, чтобы не плодить дубли.
+    """
     if not receipt_ids:
         return
     cur.execute(
-        "DELETE FROM events WHERE receipt_id = ANY(%s)",
+        "DELETE FROM events WHERE receipt_id = ANY(%s);",
         (receipt_ids,),
     )
 
 
 def create_event(cur, receipt_id, position_id, event_type, severity, details: dict):
+    """
+    Вставка события в таблицу events.
+    Схема: events(id, receipt_id, position_id, event_type, severity, created_at, details)
+    severity — ENUM event_severity (A/B/C).
+    """
     cur.execute(
         """
         INSERT INTO events (receipt_id, position_id, event_type, severity, details)
-        VALUES (%s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s);
         """,
         (receipt_id, position_id, event_type, severity, Json(details)),
     )
@@ -70,8 +111,13 @@ def create_event(cur, receipt_id, position_id, event_type, severity, details: di
 
 def process_receipt(cur, receipt_row, positions):
     """
-    Логика правил.
-    receipt_row: (id, shop, cash, shift, number, sale_time, amount, discount_amount, is_refund)
+    Основная логика правил по одному чеку.
+
+    receipt_row:
+      (id, shop, cash, shift, number, sale_time, amount, discount_amount, is_refund)
+
+    positions:
+      список строк из receipt_positions
     """
     (
         receipt_id,
@@ -85,14 +131,14 @@ def process_receipt(cur, receipt_row, positions):
         is_refund,
     ) = receipt_row
 
-    # 1) Возврат всего чека
+    # ---------- Правило 1. Возврат всего чека ----------
     if is_refund or (amount is not None and amount < 0):
         create_event(
             cur,
             receipt_id,
             None,
             "REFUND_RECEIPT",
-            "medium",
+            SEVERITY_MEDIUM,
             {
                 "shop": shop,
                 "cash": cash,
@@ -102,7 +148,7 @@ def process_receipt(cur, receipt_row, positions):
             },
         )
 
-    # 2) Большая скидка по чеку
+    # ---------- Правило 2. Большая скидка по чеку ----------
     try:
         if discount_amount is not None and amount is not None and amount > 0:
             disc_ratio = float(discount_amount) / float(amount)
@@ -112,7 +158,7 @@ def process_receipt(cur, receipt_row, positions):
                     receipt_id,
                     None,
                     "BIG_RECEIPT_DISCOUNT",
-                    "high",
+                    SEVERITY_HIGH,
                     {
                         "shop": shop,
                         "cash": cash,
@@ -126,7 +172,7 @@ def process_receipt(cur, receipt_row, positions):
     except Exception as e:
         print(f"[WARN] receipt {receipt_id}: discount calc error: {e}")
 
-    # 3) Позиции: VOID, огромная скидка, «ручная цена»
+    # ---------- Правила по позициям ----------
     for pos in positions:
         (
             pos_id,
@@ -140,14 +186,14 @@ def process_receipt(cur, receipt_row, positions):
             raw_json,
         ) = pos
 
-        # VOID позиция
+        # 3.1. VOID позиция
         if is_void:
             create_event(
                 cur,
                 receipt_id,
                 pos_id,
                 "VOID_POSITION",
-                "medium",
+                SEVERITY_MEDIUM,
                 {
                     "goods_code": goods_code,
                     "bar_code": bar_code,
@@ -157,12 +203,12 @@ def process_receipt(cur, receipt_row, positions):
                 },
             )
 
-        # Большая скидка по позиции
+        # 3.2. Большая скидка по позиции (discount >= 50% от price)
         try:
             if isinstance(raw_json, dict):
                 discount = raw_json.get("discount")
                 price = raw_json.get("price") or cost
-                if discount and price:
+                if discount is not None and price:
                     disc_ratio = float(discount) / float(price)
                     if disc_ratio >= BIG_DISCOUNT_RATIO:
                         create_event(
@@ -170,7 +216,7 @@ def process_receipt(cur, receipt_row, positions):
                             receipt_id,
                             pos_id,
                             "BIG_ITEM_DISCOUNT",
-                            "high",
+                            SEVERITY_HIGH,
                             {
                                 "goods_code": goods_code,
                                 "bar_code": bar_code,
@@ -183,7 +229,7 @@ def process_receipt(cur, receipt_row, positions):
         except Exception as e:
             print(f"[WARN] receipt {receipt_id}, pos {pos_id}: discount calc error: {e}")
 
-        # Подозрительная «ручная» цена
+        # 3.3. «Ручная цена» — условно подозрительная, если cost ∈ {1,2,3}
         try:
             if cost is not None and float(cost) in (1.0, 2.0, 3.0):
                 create_event(
@@ -191,7 +237,7 @@ def process_receipt(cur, receipt_row, positions):
                     receipt_id,
                     pos_id,
                     "MANUAL_PRICE_SUSPECT",
-                    "medium",
+                    SEVERITY_MEDIUM,
                     {
                         "goods_code": goods_code,
                         "bar_code": bar_code,
@@ -201,10 +247,18 @@ def process_receipt(cur, receipt_row, positions):
                     },
                 )
         except Exception as e:
-            print(f"[WARN] receipt {receipt_id}, pos {pos_id}: manual price check error: {e}")
+            print(
+                f"[WARN] receipt {receipt_id}, pos {pos_id}: manual price check error: {e}"
+            )
 
 
 def run_event_engine(hours=24):
+    """
+    Основной запуск EventEngine:
+    - забираем чеки за последние N часов
+    - чистим старые события по этим чекам
+    - генерируем новые события по правилам
+    """
     conn = get_connection()
     cur = conn.cursor()
 
@@ -228,7 +282,6 @@ def run_event_engine(hours=24):
             process_receipt(cur, r, positions)
         except Exception as e:
             print(f"[ERROR] process receipt {receipt_id}: {e}")
-            # продолжаем дальше, не валим весь движок
             continue
 
     cur.close()
@@ -237,4 +290,5 @@ def run_event_engine(hours=24):
 
 
 if __name__ == "__main__":
+    # Можно менять окно анализа (в часах), если надо
     run_event_engine(hours=24)
