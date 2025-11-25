@@ -5,4 +5,4 @@ venv/
 node_modules/
 *.log
 .vscode/
-.idea/
+.idea/ 
