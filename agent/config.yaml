@@ -1,5 +1,5 @@
 backend:
-  base_url: "http://localhost:8080"
+  base_url: "http://192.168.50.150:8080"
   events_endpoint: "/api/v1/ingest"
   receipts_endpoint: "/api/v1/receipts/ingest"
 
@@ -7,3 +7,4 @@ agent:
   source: "setretail"
   store_code: "MSK01"
   till_code: "KASSA-01"
+  log_file_path: "D:/logs/setretail/События.log"  # ← тут твой путь
