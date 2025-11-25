@@ -1,0 +1,6 @@
+{
+  "backend_url": "http://localhost:8080/api/v1/events/ingest",
+  "tenant_id": 1,
+  "store_id": 1
+}
+

@@ -1,0 +1,2 @@
+"""PrismaLite video proxy stub."""
+
