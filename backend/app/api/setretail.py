@@ -2,7 +2,10 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 
-from app.integrations.setretail_client import fetch_new_purchases_raw
+from app.integrations.setretail_client import (
+    fetch_new_purchases_raw,
+    fetch_purchases_by_period,
+)
 from app.integrations.setretail_parser import parse_purchases_xml
 
 router = APIRouter(prefix="/setretail", tags=["SetRetail"])
@@ -13,18 +16,18 @@ def pull_new_purchases_test():
     """
     Тест: забрать новые чеки из SetRetail за сегодняшний операционный день
     для магазина 50 (все кассы), распарсить и вернуть JSON.
+    Может вернуть count=0, если "новых" чеков нет.
     """
     try:
-        # Операционный день = сегодня, 00:00
         date_operday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
         xml_bytes = fetch_new_purchases_raw(
             date_operday=date_operday,
-            shop_number=50,      # твой магазин 50
-            cash_number=None,    # None = обе кассы (1 и 2)
+            shop_number=50,
+            cash_number=None,
             shift_number=None,
             purchase_number=None,
-            limit=100,           # до 100 чеков
+            limit=100,
         )
 
         purchases = parse_purchases_xml(xml_bytes)
@@ -35,14 +38,15 @@ def pull_new_purchases_test():
             "count": len(purchases),
             "purchases": [p.dict() for p in purchases],
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/pull-period")
 def pull_by_period():
     """
-    Получаем ВСЕ чеки за период (не только новые).
+    Получаем ВСЕ чеки за период 25.11.2025 00:00–23:59,
+    парсим XML и отдаём первые 10 чеков в JSON.
     """
     try:
         date_from = datetime(2025, 11, 25, 0, 0, 0)
@@ -51,14 +55,23 @@ def pull_by_period():
         raw_bytes = fetch_purchases_by_period(
             date_from=date_from,
             date_to=date_to,
-            shop_number=50,
         )
 
-        text = raw_bytes.decode("utf-8", errors="replace")
-        return {
-            "raw_len": len(raw_bytes),
-            "raw_preview": text[:4000],
-        }
+        # парсим XML -> список Purchase
+        purchases = parse_purchases_xml(raw_bytes)
 
+        # для отладки — берём первые 10 чеков
+        preview_purchases = purchases[:10]
+
+        # можно сразу при необходимости фильтровать по магазину 50:
+        # preview_purchases = [p for p in purchases if p.shop == "50"][:10]
+
+        return {
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "total_count": len(purchases),
+            "preview_count": len(preview_purchases),
+            "purchases": [p.dict() for p in preview_purchases],
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -31,16 +31,8 @@ def fetch_new_purchases_raw(
     limit: Optional[int] = None,
 ) -> bytes:
     """
-    Вызывает метод getNewPurchasesByParams у SetRetail
-    и возвращает XML-чеков (байты).
-
-    Параметры:
-      date_operday   — операционный день (datetime)
-      shop_number    — номер магазина
-      cash_number    — номер кассы (можно None, тогда все кассы)
-      shift_number   — номер смены (можно None)
-      purchase_number— номер чека (можно None)
-      limit          — ограничение по количеству чеков
+    getNewPurchasesByParams — "только новые" чеки.
+    Сейчас мы её используем как вспомогательную (может возвращать 0).
     """
     client = get_client()
 
@@ -54,38 +46,38 @@ def fetch_new_purchases_raw(
             limit=limit,
         )
     except Fault as e:
-        logger.error(f"SetRetail SOAP Fault: {e}")
+        logger.error(f"SetRetail SOAP Fault (getNewPurchasesByParams): {e}")
         raise
     except TransportError as e:
         logger.error(f"SetRetail transport error: {e}")
         raise
 
-    # SetRetail у тебя уже возвращает ЧИСТЫЙ XML (мы это увидели),
-    # поэтому просто приводим к bytes, без base64-декодирования.
     if isinstance(response, bytes):
         return response
     else:
         return str(response).encode("utf-8")
 
+
 def fetch_purchases_by_period(
     date_from: datetime,
     date_to: datetime,
-    shop_number: Optional[int] = None,
 ) -> bytes:
-
+    """
+    getPurchasesByPeriod — ВСЕ чеки за период.
+    Входные параметры — только fromDate и toDate.
+    """
     client = get_client()
 
     try:
         response = client.service.getPurchasesByPeriod(
-            dateFrom=date_from,
-            dateTo=date_to,
-            shopNumber=shop_number,
+            fromDate=date_from,
+            toDate=date_to,
         )
     except Fault as e:
-        logger.error(f"SOAP Fault: {e}")
+        logger.error(f"SetRetail SOAP Fault (getPurchasesByPeriod): {e}")
         raise
     except TransportError as e:
-        logger.error(f"Transport error: {e}")
+        logger.error(f"SetRetail transport error: {e}")
         raise
 
     if isinstance(response, bytes):
