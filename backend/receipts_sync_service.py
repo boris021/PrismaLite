@@ -1,6 +1,7 @@
 import requests
 import psycopg2
 import base64
+import json
 from datetime import datetime
 from xml.etree import ElementTree as ET
 import os
@@ -14,28 +15,24 @@ SETRETAIL_HOST = "192.168.50.90"
 # SOAP Endpoint из WSDL (без ?wsdl)
 ERP_URL = f"http://{SETRETAIL_HOST}:8090/SET-ERPIntegration/FiscalInfoExport"
 
+# Подключение к PostgreSQL
 PG_CONN = "dbname=prismalite user=prismalite password=PrismaLite123! host=127.0.0.1 port=5432"
 
-# Папка, куда будем складывать сырые ответы ERP (для анализа)
+# Папка для сырых файлов (на всякий случай)
 RAW_DIR = os.path.join(os.path.dirname(__file__), "_raw_erp")
 os.makedirs(RAW_DIR, exist_ok=True)
 
 
+# ================================
+# SOAP-вызов getNewPurchasesByParams
+# ================================
+
 def build_soap_getNewPurchasesByParams(oper_day: datetime) -> str:
     """
-    Строим SOAP-запрос для getNewPurchasesByParams.
-
-    В WSDL тип:
-      dateOperDay (xs:dateTime)
-      shopNumber (long, minOccurs=0)
-      cashNumber (long, minOccurs=0)
-      shiftNumber (long, minOccurs=0)
-      purchaseNumber (long, minOccurs=0)
-      limit (long, minOccurs=0)
-    Мы пока отправим только dateOperDay (все остальное пусто).
+    SOAP-обёртка для getNewPurchasesByParams.
+    Используем только dateOperDay — нам достаточно.
     """
     date_str = oper_day.isoformat()
-    # Простое тело: только дата операционного дня
     body = f"""<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
                   xmlns:erp="http://plugins.operday.ERPIntegration.crystals.ru/">
@@ -50,17 +47,16 @@ def build_soap_getNewPurchasesByParams(oper_day: datetime) -> str:
     return body
 
 
-def call_getNewPurchasesByParams():
+def call_getNewPurchasesByParams() -> str | None:
     """
     Вызывает SOAP метод getNewPurchasesByParams.
-    Возвращает распакованные байты из <return> (base64) или None.
+    Возвращает XML-строку <purchases>...</purchases> или None.
     """
     oper_day = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     soap_body = build_soap_getNewPurchasesByParams(oper_day)
 
     headers = {
         "Content-Type": "text/xml; charset=utf-8",
-        # soapAction по WSDL пустой, так что можно не указывать или оставить пустым:
         "SOAPAction": ""
     }
 
@@ -71,17 +67,16 @@ def call_getNewPurchasesByParams():
     print(f"← HTTP статус: {r.status_code}")
     print(f"← Content-Type: {r.headers.get('Content-Type')}")
 
-    # Если не 200 — просто выводим тело и выходим
     if r.status_code != 200:
         print("❌ Статус не 200, тело ответа:")
         print(r.text[:1000])
         return None
 
-    # Парсим SOAP-ответ
+    # Разбираем SOAP-обертку
     try:
         root = ET.fromstring(r.text)
     except Exception as e:
-        print(f"❌ Не удалось распарсить XML SOAP: {e}")
+        print(f"❌ Не удалось распарсить SOAP XML: {e}")
         print(r.text[:1000])
         return None
 
@@ -90,13 +85,12 @@ def call_getNewPurchasesByParams():
         "erp": "http://plugins.operday.ERPIntegration.crystals.ru/"
     }
 
-    # Пытаемся найти элемент <erp:getNewPurchasesByParamsResponse><return>...</return>
     ret_el = root.find(".//erp:getNewPurchasesByParamsResponse/erp:return", ns)
-    if ret_el is None or not ret_el.text:
-        # Иногда return может быть без префикса, попробуем по-другому
+    if ret_el is None or not (ret_el.text and ret_el.text.strip()):
+        # fallback — ищем любой <return>
         ret_el = root.find(".//return")
-        if ret_el is None or not ret_el.text:
-            print("⚠ Не найден элемент <return> с данными (возможно, нет новых чеков или другая структура).")
+        if ret_el is None or not (ret_el.text and ret_el.text.strip()):
+            print("⚠ Не найден элемент <return> с данными (возможно, нет новых чеков).")
             print(r.text[:1000])
             return None
 
@@ -111,35 +105,257 @@ def call_getNewPurchasesByParams():
 
     print(f"← Получено сырых байт: {len(raw_bytes)}")
 
-    # Сохраняем в файл для анализа (потом посмотрим, xml это или zip и как выглядит структура)
-    fname = os.path.join(RAW_DIR, f"purchases_{oper_day.strftime('%Y%m%d')}.bin")
-    with open(fname, "wb") as f:
-        f.write(raw_bytes)
-    print(f"💾 Сырые данные сохранены в файл: {fname}")
-
-    # Попробуем напечатать начало как текст (на случай, если это XML)
+    # Сохраняем сырой файл для отладки
+    fname = os.path.join(RAW_DIR, f"purchases_{oper_day.strftime('%Y%m%d_%H%M%S')}.bin")
     try:
-        preview = raw_bytes[:1000].decode("utf-8", errors="ignore")
-        print("——— ПРЕВЬЮ содержимого (как UTF-8) ———")
-        print(preview)
-        print("————————————")
-    except Exception:
-        pass
+        with open(fname, "wb") as f:
+            f.write(raw_bytes)
+        print(f"💾 Сырые данные сохранены в файл: {fname}")
+    except Exception as e:
+        print(f"⚠ Не удалось сохранить сырой файл: {e}")
 
-    return raw_bytes
+    # Пробуем интерпретировать как UTF-8 XML
+    try:
+        xml_text = raw_bytes.decode("utf-8", errors="ignore")
+    except Exception as e:
+        print(f"❌ Не удалось декодировать bytes → UTF-8: {e}")
+        return None
+
+    # Небольшое превью
+    print("——— ПРЕВЬЮ XML (начало) ———")
+    print(xml_text[:500])
+    print("————————————")
+
+    return xml_text
+
+
+# ================================
+# Парсинг XML и запись в PostgreSQL
+# ================================
+
+def parse_oper_day(oper_day_str: str | None) -> str | None:
+    """
+    operDay приходит как '2025-11-25+05:00'
+    В БД в DATE достаточно '2025-11-25'.
+    """
+    if not oper_day_str:
+        return None
+    # отрежем по '+'
+    return oper_day_str.split('+', 1)[0]
 
 
 def sync_receipts():
     """
-    Временная версия: только ходит в ERPIntegration и сохраняет сырые данные.
-    К Postgres пока не лезем, пока не поймём точный формат внутри.
+    Главная функция:
+    1) Получаем XML из getNewPurchasesByParams
+    2) Парсим <purchase>
+    3) Пишем в PostgreSQL (с дедупликацией)
     """
-    raw = call_getNewPurchasesByParams()
-    if raw is None or len(raw) == 0:
-        print("⚠ Данные от ERPIntegration не получены или пустые.")
+    xml_text = call_getNewPurchasesByParams()
+    if not xml_text:
+        print("⚠ XML с чеками не получен (нет новых чеков или ошибка).")
         return
 
-    print("✅ ERPIntegration отработал, данные получены. Парсинг и запись в БД сделаем следующим шагом.")
+    try:
+        root = ET.fromstring(xml_text)
+    except Exception as e:
+        print(f"❌ Не удалось распарсить XML с чеками: {e}")
+        print(xml_text[:1000])
+        return
+
+    if root.tag != "purchases":
+        print(f"⚠ Ожидался корневой тег <purchases>, а получили <{root.tag}>")
+        return
+
+    purchase_elements = root.findall("purchase")
+    print(f"→ Найдено покупок в XML: {len(purchase_elements)}")
+
+    if not purchase_elements:
+        print("⚠ В XML нет покупок (count=0).")
+        return
+
+    conn = psycopg2.connect(PG_CONN)
+    cur = conn.cursor()
+
+    new_count = 0
+
+    for purch_el in purchase_elements:
+        attrs = purch_el.attrib
+
+        tab_number = attrs.get("tabNumber")
+        user_name = attrs.get("userName")
+        operation_type_str = attrs.get("operationType")  # "true"/"false"
+        is_refund = (operation_type_str == "false" or operation_type_str == "0")
+        cash_operation = attrs.get("cashOperation")
+        oper_day_str = attrs.get("operDay")
+        oper_day = parse_oper_day(oper_day_str)
+
+        shop = attrs.get("shop")
+        cash = attrs.get("cash")
+        shift = attrs.get("shift")
+        number = attrs.get("number")
+
+        sale_time = attrs.get("saletime")  # TIMESTAMP строкой
+        amount = attrs.get("amount")
+        discount_amount = attrs.get("discountAmount")
+        inn = attrs.get("inn")
+        fiscal_doc_num = attrs.get("fiscalDocNum")
+        status = attrs.get("status")  # может отсутствовать
+
+        # plugin-property для чека
+        plugin_props = {}
+        uid_purchase = None
+        for pp in purch_el.findall("plugin-property"):
+            key = pp.get("key")
+            value = pp.get("value")
+            plugin_props[key] = value
+            if key == "UID_PURCHASE":
+                uid_purchase = value
+
+        # Дедупликация
+        receipt_id = None
+
+        if uid_purchase:
+            cur.execute("SELECT id FROM receipts WHERE uid_purchase = %s", (uid_purchase,))
+            row = cur.fetchone()
+            if row:
+                # чек уже есть
+                continue
+
+        # если uid_purchase нет или не нашли — проверяем по (shop, cash, shift, number)
+        if not uid_purchase:
+            cur.execute("""
+                SELECT id FROM receipts
+                WHERE shop = %s AND cash = %s AND shift = %s AND number = %s
+            """, (shop, cash, shift, number))
+            row = cur.fetchone()
+            if row:
+                continue
+
+        # Собираем raw_json для чека
+        raw_receipt = {
+            "attrs": attrs,
+            "plugin_properties": plugin_props
+        }
+
+        # INSERT в receipts
+        cur.execute("""
+            INSERT INTO receipts (
+                uid_purchase,
+                shop, cash, shift, number,
+                oper_day, sale_time,
+                tab_number, user_name,
+                amount, discount_amount,
+                inn, status, is_refund,
+                raw_json
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (
+            uid_purchase,
+            shop, cash, shift, number,
+            oper_day,
+            sale_time,
+            tab_number, user_name,
+            amount, discount_amount,
+            inn, status, is_refund,
+            json.dumps(raw_receipt, ensure_ascii=False)
+        ))
+
+        receipt_id = cur.fetchone()[0]
+
+        # --- Позиции чека ---
+        positions_container = purch_el.find("positions")
+        if positions_container is not None:
+            for pos_el in positions_container.findall("position"):
+                pattrs = pos_el.attrib
+                pos_order = pattrs.get("order")
+                goods_code = pattrs.get("goodsCode")
+                bar_code = pattrs.get("barCode")
+                count = pattrs.get("count")
+                cost = pattrs.get("cost")
+                nds = pattrs.get("nds")
+                # is_void пока не встречается — считаем False
+                is_void = False
+
+                # plugin-property по позиции
+                pos_pp = {}
+                for ppp in pos_el.findall("plugin-property"):
+                    key = ppp.get("key")
+                    value = ppp.get("value")
+                    pos_pp[key] = value
+
+                raw_pos = {
+                    "attrs": pattrs,
+                    "plugin_properties": pos_pp
+                }
+
+                cur.execute("""
+                    INSERT INTO receipt_positions (
+                        receipt_id,
+                        pos_order,
+                        goods_code,
+                        bar_code,
+                        count,
+                        cost,
+                        nds,
+                        is_void,
+                        raw_json
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    receipt_id,
+                    pos_order,
+                    goods_code,
+                    bar_code,
+                    count,
+                    cost,
+                    nds,
+                    is_void,
+                    json.dumps(raw_pos, ensure_ascii=False)
+                ))
+
+        # --- Оплаты ---
+        payments_container = purch_el.find("payments")
+        if payments_container is not None:
+            for pay_el in payments_container.findall("payment"):
+                pay_attrs = pay_el.attrib
+                payment_type = pay_attrs.get("typeClass")  # BankCardPaymentEntity и т.д.
+                pay_amount = pay_attrs.get("amount")
+
+                pay_pp = {}
+                for ppp in pay_el.findall("plugin-property"):
+                    key = ppp.get("key")
+                    value = ppp.get("value")
+                    pay_pp[key] = value
+
+                raw_pay = {
+                    "attrs": pay_attrs,
+                    "plugin_properties": pay_pp
+                }
+
+                cur.execute("""
+                    INSERT INTO receipt_payments (
+                        receipt_id,
+                        payment_type,
+                        amount,
+                        raw_json
+                    )
+                    VALUES (%s,%s,%s,%s)
+                """, (
+                    receipt_id,
+                    payment_type,
+                    pay_amount,
+                    json.dumps(raw_pay, ensure_ascii=False)
+                ))
+
+        new_count += 1
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    print(f"✅ Новых чеков сохранено: {new_count}")
 
 
 if __name__ == "__main__":
