@@ -1,0 +1,9 @@
+backend:
+  base_url: "http://localhost:8080"
+  events_endpoint: "/api/v1/ingest"
+  receipts_endpoint: "/api/v1/receipts/ingest"
+
+agent:
+  source: "setretail"
+  store_code: "MSK01"
+  till_code: "KASSA-01"

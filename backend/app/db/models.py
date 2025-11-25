@@ -134,7 +134,10 @@ def insert_event(edr: Dict[str, Any]) -> int:
         raw_source = "agent"
 
     raw_line = raw_block.get("line")
-    correlation_id = receipt_block.get("number")  # используем номер чека
+
+    # используем номер чека как correlation_id
+    receipt_number = receipt_block.get("number")
+    correlation_id = receipt_number
 
     conn = get_connection()
     try:
@@ -145,6 +148,26 @@ def insert_event(edr: Dict[str, Any]) -> int:
                 cashier_id = get_or_create_cashier(cur, cashier_external_id)
                 event_type_id = get_event_type_id(cur, int(event_code))
 
+                # пробуем найти чек, если он уже есть
+                receipt_id = None
+                if receipt_number:
+                    cur.execute(
+                        """
+                        SELECT r.id
+                        FROM prismalite.receipts r
+                        WHERE r.store_id = %s
+                          AND r.till_id = %s
+                          AND r.fiscal_doc_number = %s
+                        ORDER BY r.id DESC
+                        LIMIT 1
+                        """,
+                        (store_id, till_id, receipt_number),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        receipt_id = row[0]
+
+                # вставляем событие
                 cur.execute(
                     """
                     INSERT INTO prismalite.events (
@@ -161,7 +184,8 @@ def insert_event(edr: Dict[str, Any]) -> int:
                         correlation_id
                     )
                     VALUES (
-                        %s, %s, %s, NULL,
+                        %s, %s, %s,
+                        %s,
                         %s, %s, %s,
                         %s, %s, %s, %s
                     )
@@ -171,6 +195,7 @@ def insert_event(edr: Dict[str, Any]) -> int:
                         store_id,
                         till_id,
                         cashier_id,
+                        receipt_id,        # может быть NULL или реальный id чека
                         event_type_id,
                         int(event_code),
                         raw_source,
@@ -181,6 +206,7 @@ def insert_event(edr: Dict[str, Any]) -> int:
                     ),
                 )
                 event_id = cur.fetchone()[0]
+
         return event_id
     finally:
         conn.close()
@@ -192,10 +218,10 @@ def insert_event(edr: Dict[str, Any]) -> int:
 
 def insert_receipt_with_items(edr_receipt: Dict[str, Any]) -> int:
     """
-    Принимает структуру чека (см. JSON формат) и создаёт:
+    Принимает структуру чека и создаёт:
     - запись в prismalite.receipts
     - записи в prismalite.receipt_items
-    - линкует events.receipt_id по store/till/receipt.number
+    - линкует events.receipt_id по store/till/receipt.number (fiscal_doc_number)
     Возвращает id чека.
     """
     store_block = edr_receipt.get("store") or {}
@@ -211,14 +237,30 @@ def insert_receipt_with_items(edr_receipt: Dict[str, Any]) -> int:
     if not till_code:
         raise ValueError("till.code is required")
 
+    # номер чека из JSON
     receipt_number = receipt_block.get("number")
     if not receipt_number:
         raise ValueError("receipt.number is required")
 
     operation_type = receipt_block.get("operation_type", "SALE")
     business_date = parse_iso_date(receipt_block.get("business_date"))
-    opened_at = parse_iso_datetime(receipt_block.get("opened_at")) if receipt_block.get("opened_at") else None
-    closed_at = parse_iso_datetime(receipt_block.get("closed_at")) if receipt_block.get("closed_at") else None
+    
+
+    # opened_at обязателен в схеме — fallback на текущее время
+    opened_at = (
+        parse_iso_datetime(receipt_block.get("opened_at"))
+        if receipt_block.get("opened_at")
+        else datetime.utcnow()
+    )
+
+    # closed_at может быть NULL
+    closed_at = (
+        parse_iso_datetime(receipt_block.get("closed_at"))
+        if receipt_block.get("closed_at")
+        else None
+    )
+
+
     total_amount = receipt_block.get("total_amount")
 
     items: List[Dict[str, Any]] = receipt_block.get("items") or []
@@ -239,7 +281,7 @@ def insert_receipt_with_items(edr_receipt: Dict[str, Any]) -> int:
                         store_id,
                         till_id,
                         cashier_id,
-                        number,
+                        fiscal_doc_number,
                         operation_type,
                         business_date,
                         opened_at,
@@ -253,7 +295,7 @@ def insert_receipt_with_items(edr_receipt: Dict[str, Any]) -> int:
                         store_id,
                         till_id,
                         cashier_id,
-                        receipt_number,
+                        receipt_number,    # кладём наш "number" в fiscal_doc_number
                         operation_type,
                         business_date,
                         opened_at,
@@ -272,37 +314,45 @@ def insert_receipt_with_items(edr_receipt: Dict[str, Any]) -> int:
                     quantity = item.get("quantity")
                     price = item.get("price")
                     amount = item.get("amount")
-                    vat_rate = item.get("vat_rate")
+                    # в JSON у нас vat_rate, в БД — tax_rate
+                    tax_rate = item.get("vat_rate")  # просто переиспользуем поле
+                    discount_amount = item.get("discount_amount", 0)
+                    discount_reason = item.get("discount_reason")
 
                     cur.execute(
                         """
                         INSERT INTO prismalite.receipt_items (
                             receipt_id,
                             line_number,
-                            barcode,
                             sku,
+                            barcode,
                             name,
                             quantity,
                             price,
                             amount,
-                            vat_rate
+                            discount_amount,
+                            discount_reason,
+                            tax_rate
                         )
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         """,
                         (
                             receipt_id,
                             line_number,
-                            barcode,
                             sku,
+                            barcode,
                             name,
                             quantity,
                             price,
                             amount,
-                            vat_rate,
+                            discount_amount,
+                            discount_reason,
+                            tax_rate,
                         ),
                     )
 
                 # линкуем события по номеру чека (correlation_id)
+                # correlation_id мы уже пишем в events из EDR-событий как receipt.number
                 cur.execute(
                     """
                     UPDATE prismalite.events
