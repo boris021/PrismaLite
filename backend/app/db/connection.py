@@ -11,17 +11,14 @@ DB_PORT = int(os.getenv("DB_PORT", "5432"))
 
 
 def get_connection():
-    """
-    Открывает синхронное подключение к PostgreSQL.
-    Для простоты пока без пула соединений.
-    """
     conn = psycopg2.connect(
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        host=DB_HOST,
-        port=DB_PORT,
+        host=os.getenv("DB_HOST", "localhost"),
+        port=int(os.getenv("DB_PORT", "5432")),
+        dbname=os.getenv("DB_NAME", "prismalite"),
+        user=os.getenv("DB_USER", "postgres"),      # ← БЫЛО "prismalite"
+        password=os.getenv("DB_PASSWORD", "postgres"),  # ← Поставь свой реальный пароль
     )
+    conn.autocommit = True
     return conn
 
 
