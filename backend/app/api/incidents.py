@@ -1,12 +1,12 @@
 from datetime import datetime
-from typing import List, Optional
-
 from enum import Enum
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.db.connection import get_connection
+
 
 router = APIRouter(tags=["incidents"])
 
@@ -36,23 +36,23 @@ class IncidentStatusUpdate(BaseModel):
 def list_incidents(
     severity: Optional[List[str]] = Query(
         default=None,
-        description="Фильтр по severity: A/B/C"
+        description="Фильтр по severity: A/B/C",
     ),
     status: Optional[List[str]] = Query(
         default=None,
-        description="Фильтр по статусу: new/in_progress/closed/false_positive"
+        description="Фильтр по статусу: new/in_progress/closed/false_positive",
     ),
     shop: Optional[str] = Query(
         default=None,
-        description="Фильтр по магазину"
+        description="Фильтр по магазину (shop)",
     ),
     date_from: Optional[datetime] = Query(
         default=None,
-        description="Начало периода по sale_time"
+        description="Начало периода по sale_time",
     ),
     date_to: Optional[datetime] = Query(
         default=None,
-        description="Конец периода по sale_time (включительно)"
+        description="Конец периода по sale_time (включительно)",
     ),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -61,8 +61,8 @@ def list_incidents(
     Список инцидентов с фильтрами.
 
     Возвращает:
-    - список инцидентов
-    - total — общее количество с учётом фильтров (для пагинации)
+      - items: список инцидентов
+      - total: общее количество (для пагинации)
     """
     conn = get_connection()
     try:
@@ -91,7 +91,7 @@ def list_incidents(
             where_clauses.append("sale_time >= %s")
             params.append(date_from)
         if date_to:
-            # делаем <=, а не <, чтобы включить конец дня
+            # включительно
             where_clauses.append("sale_time <= %s")
             params.append(date_to)
 
@@ -101,7 +101,7 @@ def list_incidents(
         cur.execute(
             f"""
             SELECT COUNT(*)
-            FROM prismalite.incidents
+            FROM incidents
             WHERE {where_sql}
             """,
             params,
@@ -127,7 +127,7 @@ def list_incidents(
                 video_to,
                 created_at,
                 updated_at
-            FROM prismalite.incidents
+            FROM incidents
             WHERE {where_sql}
             ORDER BY sale_time DESC, id DESC
             LIMIT %s OFFSET %s
@@ -194,8 +194,8 @@ def list_incidents(
 def get_incident(incident_id: int):
     """
     Детальная карточка инцидента:
-    - данные из prismalite.incidents
-    - events[] — связанные события
+      - incident: данные из incidents
+      - events: связанные события по incident_events
     """
     conn = get_connection()
     try:
@@ -220,8 +220,10 @@ def get_incident(incident_id: int):
                 video_to,
                 video_meta,
                 created_at,
-                updated_at
-            FROM prismalite.incidents
+                updated_at,
+                last_comment,
+                updated_by
+            FROM incidents
             WHERE id = %s
             """,
             (incident_id,),
@@ -247,6 +249,8 @@ def get_incident(incident_id: int):
             video_meta,
             created_at,
             updated_at,
+            last_comment,
+            updated_by,
         ) = row
 
         incident = {
@@ -266,6 +270,8 @@ def get_incident(incident_id: int):
             "video_meta": video_meta,
             "created_at": created_at,
             "updated_at": updated_at,
+            "last_comment": last_comment,
+            "updated_by": updated_by,
         }
 
         # связанные события
@@ -277,8 +283,8 @@ def get_incident(incident_id: int):
                 e.severity,
                 e.created_at,
                 e.details
-            FROM prismalite.incident_events ie
-            JOIN prismalite.events e ON e.id = ie.event_id
+            FROM incident_events ie
+            JOIN events e ON e.id = ie.event_id
             WHERE ie.incident_id = %s
             ORDER BY e.created_at ASC, e.id ASC
             """,
@@ -318,13 +324,13 @@ def update_incident_status(
 ):
     """
     Смена статуса инцидента:
-    - status: new / in_progress / closed / false_positive
-    - comment: опциональный комментарий
-    - updated_by: кто изменил (логин / ФИО)
+      - status: new / in_progress / closed / false_positive
+      - comment: опциональный комментарий
+      - updated_by: кто изменил (логин / ФИО)
 
-    Требует столбцы:
+    Требует столбцы в incidents:
       - status incident_status NOT NULL
-      - updated_at timestamptz
+      - updated_at timestamptz NOT NULL
       - last_comment text NULL
       - updated_by text NULL
     """
@@ -334,7 +340,7 @@ def update_incident_status(
 
         cur.execute(
             """
-            UPDATE prismalite.incidents
+            UPDATE incidents
             SET
                 status = %s,
                 updated_at = NOW(),
