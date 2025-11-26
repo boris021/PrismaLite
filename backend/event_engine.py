@@ -1,294 +1,332 @@
+# backend/incident_engine.py
+
+import sys
+from typing import Dict, Any, List
+
 import psycopg2
 from psycopg2.extras import Json
-from datetime import datetime
 
-
-# ⚙️ Подключение к БД
-# ВАЖНО: Скопируй сюда тот же пароль, который у тебя стоит в scripts/convert_pos_documents.py
+# ⚙️ Подключение к БД — так же, как в event_engine.py
 DB = {
     "host": "localhost",
     "dbname": "prismalite",
     "user": "postgres",
-    "password": "postgres",  # ← ЗАМЕНИ на свой рабочий пароль
+    "password": "postgres",  # ← ЗАМЕНИ на свой рабочий пароль, если другой
 }
 
-# Порог «большой скидки» (50% и больше)
-BIG_DISCOUNT_RATIO = 0.5
-
-# Маппинг под ENUM event_severity (A/B/C)
-# См. в БД: SELECT * FROM pg_type WHERE typname = 'event_severity';
-SEVERITY_HIGH = "A"    # критичное
-SEVERITY_MEDIUM = "B"  # среднее
-SEVERITY_LOW = "C"     # информационное
+# Приоритет severity (A > B > C)
+SEVERITY_ORDER = {
+    "A": 3,
+    "B": 2,
+    "C": 1,
+}
 
 
 def get_connection():
-    """
-    Открываем соединение с автокоммитом,
-    чтобы не залипать в aborted-транзакциях.
-    """
     conn = psycopg2.connect(**DB)
     conn.autocommit = True
     return conn
 
 
-def fetch_recent_receipts(cur, hours=24):
+def fetch_events_for_period(cur, hours: int = 24):
     """
-    Берём чеки за последние N часов.
-    Под твою схему: receipts(id, shop, cash, shift, number, sale_time, amount, discount_amount, is_refund)
+    Забираем события за последние N часов + сразу подтягиваем чек,
+    чтобы заполнить поля incidents.shop / cash / shift / number / sale_time.
     """
     cur.execute(
         """
-        SELECT id,
-               shop,
-               cash,
-               shift,
-               number,
-               sale_time,
-               amount,
-               discount_amount,
-               is_refund
-        FROM receipts
-        WHERE sale_time >= now() - (%s || ' hours')::interval
-        ORDER BY sale_time DESC;
+        SELECT
+            e.id          AS event_id,
+            e.receipt_id  AS receipt_id,
+            e.position_id AS position_id,
+            e.event_type  AS event_type,
+            e.severity    AS severity,
+            e.created_at  AS created_at,
+            e.details     AS details,
+            r.shop        AS shop,
+            r.cash        AS cash,
+            r.shift       AS shift,
+            r.number      AS number,
+            r.sale_time   AS sale_time
+        FROM events e
+        JOIN receipts r ON r.id = e.receipt_id
+        WHERE e.created_at >= now() - (%s || ' hours')::interval
+        ORDER BY e.receipt_id, e.created_at, e.id;
         """,
         (hours,),
     )
     return cur.fetchall()
 
 
-def fetch_positions_for_receipt(cur, receipt_id: int):
+def merge_event_types(existing: List[str], new_types: List[str]) -> List[str]:
     """
-    Позиции по чеку из receipt_positions.
-    Твоя схема: id, receipt_id, pos_order, goods_code, bar_code, count, cost, nds, is_void, raw_json
+    Объединяем старые и новые event_types без дублей.
+    """
+    s = set(existing or [])
+    for t in new_types:
+        if t is not None:
+            s.add(t)
+    return sorted(s)
+
+
+def get_or_create_incident(
+    cur,
+    receipt_id: int,
+    best_severity: str,
+    event_types: List[str],
+    events_count: int,
+    meta: Dict[str, Any],
+):
+    """
+    Находим или создаём инцидент по receipt_id.
+    Схема incidents (по твоему \d incidents):
+      id, receipt_id, severity, status, created_at, updated_at,
+      shop, cash, shift, number, sale_time,
+      event_types text[], events_count int,
+      video_from, video_to, video_meta jsonb
     """
     cur.execute(
         """
-        SELECT id,
-               pos_order,
-               goods_code,
-               bar_code,
-               count,
-               cost,
-               nds,
-               is_void,
-               raw_json
-        FROM receipt_positions
+        SELECT id, severity, status, event_types, events_count
+        FROM incidents
         WHERE receipt_id = %s
-        ORDER BY pos_order NULLS FIRST, id;
+        LIMIT 1;
         """,
         (receipt_id,),
     )
-    return cur.fetchall()
+    row = cur.fetchone()
 
+    shop = meta.get("shop")
+    cash = meta.get("cash")
+    shift = meta.get("shift")
+    number = meta.get("number")
+    sale_time = meta.get("sale_time")
 
-def clear_events_for_receipts(cur, receipt_ids):
-    """
-    Чистим старые события по этим чекам, чтобы не плодить дубли.
-    """
-    if not receipt_ids:
-        return
+    if row:
+        incident_id, old_severity, status, existing_event_types, existing_count = row
+
+        # Обновляем severity, если новый хуже (A > B > C)
+        final_severity = old_severity
+        if (
+            old_severity in SEVERITY_ORDER
+            and best_severity in SEVERITY_ORDER
+            and SEVERITY_ORDER[best_severity] > SEVERITY_ORDER[old_severity]
+        ):
+            final_severity = best_severity
+
+        # Обновляем список типов событий и счётчик
+        merged_types = merge_event_types(existing_event_types or [], event_types)
+        total_count = max(existing_count or 0, events_count)
+
+        cur.execute(
+            """
+            UPDATE incidents
+            SET severity    = %s,
+                shop        = %s,
+                cash        = %s,
+                shift       = %s,
+                number      = %s,
+                sale_time   = %s,
+                event_types = %s,
+                events_count = %s
+            WHERE id = %s;
+            """,
+            (
+                final_severity,
+                shop,
+                cash,
+                shift,
+                number,
+                sale_time,
+                merged_types,
+                total_count,
+                incident_id,
+            ),
+        )
+
+        return incident_id
+
+    # Инцидента ещё нет — создаём
     cur.execute(
-        "DELETE FROM events WHERE receipt_id = ANY(%s);",
-        (receipt_ids,),
+        """
+        INSERT INTO incidents (
+            receipt_id,
+            severity,
+            shop,
+            cash,
+            shift,
+            number,
+            sale_time,
+            event_types,
+            events_count
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id;
+        """,
+        (
+            receipt_id,
+            best_severity,
+            shop,
+            cash,
+            shift,
+            number,
+            sale_time,
+            event_types,
+            events_count,
+        ),
     )
+    (incident_id,) = cur.fetchone()
+    return incident_id
 
 
-def create_event(cur, receipt_id, position_id, event_type, severity, details: dict):
+def relink_incident_events(cur, incident_id: int, event_ids: List[int]):
     """
-    Вставка события в таблицу events.
-    Схема: events(id, receipt_id, position_id, event_type, severity, created_at, details)
-    severity — ENUM event_severity (A/B/C).
+    Для заданного инцидента:
+      - удаляем все старые связи
+      - создаём связи заново
+
+    Это не зависит от структуры incident_events (важно только, что там есть incident_id, event_id).
     """
     cur.execute(
         """
-        INSERT INTO events (receipt_id, position_id, event_type, severity, details)
-        VALUES (%s, %s, %s, %s, %s);
+        DELETE FROM incident_events
+        WHERE incident_id = %s;
         """,
-        (receipt_id, position_id, event_type, severity, Json(details)),
+        (incident_id,),
+    )
+
+    if not event_ids:
+        return
+
+    cur.executemany(
+        """
+        INSERT INTO incident_events (incident_id, event_id)
+        VALUES (%s, %s);
+        """,
+        [(incident_id, eid) for eid in event_ids],
     )
 
 
-def process_receipt(cur, receipt_row, positions):
+def run_incident_engine(hours: int = 24):
     """
-    Основная логика правил по одному чеку.
-
-    receipt_row:
-      (id, shop, cash, shift, number, sale_time, amount, discount_amount, is_refund)
-
-    positions:
-      список строк из receipt_positions
-    """
-    (
-        receipt_id,
-        shop,
-        cash,
-        shift,
-        number,
-        sale_time,
-        amount,
-        discount_amount,
-        is_refund,
-    ) = receipt_row
-
-    # ---------- Правило 1. Возврат всего чека ----------
-    if is_refund or (amount is not None and amount < 0):
-        create_event(
-            cur,
-            receipt_id,
-            None,
-            "REFUND_RECEIPT",
-            SEVERITY_MEDIUM,
-            {
-                "shop": shop,
-                "cash": cash,
-                "shift": shift,
-                "number": number,
-                "amount": float(amount) if amount is not None else None,
-            },
-        )
-
-    # ---------- Правило 2. Большая скидка по чеку ----------
-    try:
-        if discount_amount is not None and amount is not None and amount > 0:
-            disc_ratio = float(discount_amount) / float(amount)
-            if disc_ratio >= BIG_DISCOUNT_RATIO:
-                create_event(
-                    cur,
-                    receipt_id,
-                    None,
-                    "BIG_RECEIPT_DISCOUNT",
-                    SEVERITY_HIGH,
-                    {
-                        "shop": shop,
-                        "cash": cash,
-                        "shift": shift,
-                        "number": number,
-                        "amount": float(amount),
-                        "discount_amount": float(discount_amount),
-                        "discount_ratio": disc_ratio,
-                    },
-                )
-    except Exception as e:
-        print(f"[WARN] receipt {receipt_id}: discount calc error: {e}")
-
-    # ---------- Правила по позициям ----------
-    for pos in positions:
-        (
-            pos_id,
-            pos_order,
-            goods_code,
-            bar_code,
-            cnt,
-            cost,
-            nds,
-            is_void,
-            raw_json,
-        ) = pos
-
-        # 3.1. VOID позиция
-        if is_void:
-            create_event(
-                cur,
-                receipt_id,
-                pos_id,
-                "VOID_POSITION",
-                SEVERITY_MEDIUM,
-                {
-                    "goods_code": goods_code,
-                    "bar_code": bar_code,
-                    "pos_order": pos_order,
-                    "count": float(cnt) if cnt is not None else None,
-                    "cost": float(cost) if cost is not None else None,
-                },
-            )
-
-        # 3.2. Большая скидка по позиции (discount >= 50% от price)
-        try:
-            if isinstance(raw_json, dict):
-                discount = raw_json.get("discount")
-                price = raw_json.get("price") or cost
-                if discount is not None and price:
-                    disc_ratio = float(discount) / float(price)
-                    if disc_ratio >= BIG_DISCOUNT_RATIO:
-                        create_event(
-                            cur,
-                            receipt_id,
-                            pos_id,
-                            "BIG_ITEM_DISCOUNT",
-                            SEVERITY_HIGH,
-                            {
-                                "goods_code": goods_code,
-                                "bar_code": bar_code,
-                                "pos_order": pos_order,
-                                "price": float(price),
-                                "discount": float(discount),
-                                "discount_ratio": disc_ratio,
-                            },
-                        )
-        except Exception as e:
-            print(f"[WARN] receipt {receipt_id}, pos {pos_id}: discount calc error: {e}")
-
-        # 3.3. «Ручная цена» — условно подозрительная, если cost ∈ {1,2,3}
-        try:
-            if cost is not None and float(cost) in (1.0, 2.0, 3.0):
-                create_event(
-                    cur,
-                    receipt_id,
-                    pos_id,
-                    "MANUAL_PRICE_SUSPECT",
-                    SEVERITY_MEDIUM,
-                    {
-                        "goods_code": goods_code,
-                        "bar_code": bar_code,
-                        "pos_order": pos_order,
-                        "count": float(cnt) if cnt is not None else None,
-                        "cost": float(cost),
-                    },
-                )
-        except Exception as e:
-            print(
-                f"[WARN] receipt {receipt_id}, pos {pos_id}: manual price check error: {e}"
-            )
-
-
-def run_event_engine(hours=24):
-    """
-    Основной запуск EventEngine:
-    - забираем чеки за последние N часов
-    - чистим старые события по этим чекам
-    - генерируем новые события по правилам
+    Основной запуск IncidentEngine:
+    - забираем события за последние N часов
+    - группируем по receipt_id
+    - создаём/обновляем инциденты в incidents
+    - пересобираем связи incident_events
     """
     conn = get_connection()
     cur = conn.cursor()
 
-    print(f"[INFO] Running EventEngine for last {hours} hours...")
-    receipts = fetch_recent_receipts(cur, hours=hours)
-    print(f"[INFO] Loaded {len(receipts)} receipts")
+    print(f"[INFO] Running IncidentEngine for last {hours} hours...")
 
-    receipt_ids = [r[0] for r in receipts]
-    clear_events_for_receipts(cur, receipt_ids)
-    print(f"[INFO] Cleared existing events for {len(receipt_ids)} receipts")
+    rows = fetch_events_for_period(cur, hours=hours)
+    print(f"[INFO] Loaded {len(rows)} events")
 
-    for r in receipts:
-        receipt_id = r[0]
-        try:
-            positions = fetch_positions_for_receipt(cur, receipt_id)
-        except Exception as e:
-            print(f"[ERROR] fetch positions for receipt {receipt_id}: {e}")
+    if not rows:
+        cur.close()
+        conn.close()
+        print("[INFO] No events found, nothing to do")
+        return
+
+    # Группируем события по чеку
+    events_by_receipt: Dict[int, List[Dict[str, Any]]] = {}
+    meta_by_receipt: Dict[int, Dict[str, Any]] = {}
+
+    for row in rows:
+        (
+            event_id,
+            receipt_id,
+            position_id,
+            event_type,
+            severity,
+            created_at,
+            details,
+            shop,
+            cash,
+            shift,
+            number,
+            sale_time,
+        ) = row
+
+        events_by_receipt.setdefault(receipt_id, []).append(
+            {
+                "id": event_id,
+                "position_id": position_id,
+                "event_type": event_type,
+                "severity": severity,
+                "created_at": created_at,
+                "details": details,
+            }
+        )
+
+        if receipt_id not in meta_by_receipt:
+            meta_by_receipt[receipt_id] = {
+                "shop": shop,
+                "cash": cash,
+                "shift": shift,
+                "number": number,
+                "sale_time": sale_time,
+            }
+
+    print(f"[INFO] Grouped into {len(events_by_receipt)} receipts")
+
+    # По каждому чеку — создаём/обновляем инцидент
+    for receipt_id, ev_list in events_by_receipt.items():
+        # 1. Определяем максимальный severity по событиям
+        best_severity = None
+        for ev in ev_list:
+            sev = ev["severity"]
+            if sev not in SEVERITY_ORDER:
+                continue
+            if (
+                best_severity is None
+                or SEVERITY_ORDER[sev] > SEVERITY_ORDER.get(best_severity, 0)
+            ):
+                best_severity = sev
+
+        if best_severity is None:
+            print(f"[WARN] receipt {receipt_id}: no valid severity, skip")
             continue
 
-        try:
-            process_receipt(cur, r, positions)
-        except Exception as e:
-            print(f"[ERROR] process receipt {receipt_id}: {e}")
-            continue
+        # 2. Список типов событий и счётчик
+        event_types = sorted({ev["event_type"] for ev in ev_list if ev["event_type"]})
+        events_count = len(ev_list)
+        meta = meta_by_receipt.get(receipt_id, {})
+
+        # 3. Создаём / обновляем инцидент
+        incident_id = get_or_create_incident(
+            cur,
+            receipt_id=receipt_id,
+            best_severity=best_severity,
+            event_types=event_types,
+            events_count=events_count,
+            meta=meta,
+        )
+
+        # 4. Перелинкуем связи incident_events
+        event_ids = [ev["id"] for ev in ev_list]
+        relink_incident_events(cur, incident_id, event_ids)
+
+        print(
+            f"[INFO] receipt {receipt_id}: incident {incident_id} "
+            f"severity={best_severity}, events={len(event_ids)}"
+        )
 
     cur.close()
     conn.close()
-    print("[INFO] EventEngine finished")
+    print("[INFO] IncidentEngine finished")
 
 
 if __name__ == "__main__":
-    # Можно менять окно анализа (в часах), если надо
-    run_event_engine(hours=24)
+    # CLI:
+    #   python incident_engine.py           → за последние 24 часа
+    #   python incident_engine.py 1         → за последний 1 час
+    hours = 24
+    if len(sys.argv) >= 2:
+        try:
+            hours = int(sys.argv[1])
+        except ValueError:
+            pass
+
+    run_incident_engine(hours=hours)
