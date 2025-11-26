@@ -4,29 +4,19 @@
     <meta charset="UTF-8" />
     <title>PrismaLite | Оперативный контроль</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-    <!-- Базовые стили UI -->
-    <link rel="stylesheet" href="/static/styles.css" />
-    <!-- Тёмная тема -->
     <link rel="stylesheet" href="/static/prismalite-dark.css" />
 </head>
 
-
 <body>
-
 <div class="pl-app">
-    <!-- Верхняя панель -->
+    <!-- ВЕРХНЯЯ ПАНЕЛЬ -->
     <header class="pl-topbar">
-        <div class="pl-logo">
-            <div class="pl-logo-badge">PL</div>
-            <div>
-                <div class="pl-logo-title">PrismaLite</div>
-                <div class="pl-logo-sub">Служба безопасности · Оперативный контроль</div>
-            </div>
-        </div>
+        <div class="pl-logo-badge">PL</div>
+        <div class="pl-logo-title">PrismaLite</div>
+        <div class="pl-logo-sub">Служба безопасности · Оперативный контроль</div>
 
         <nav class="pl-top-nav">
-            <button class="pl-top-nav-btn pl-top-nav-btn--active">Оперативный</button>
+            <button class="pl-top-nav-btn pl-top-nav-btn-active">Оперативный</button>
             <button class="pl-top-nav-btn">Аналитический</button>
             <button class="pl-top-nav-btn">Отчёты</button>
             <button class="pl-top-nav-btn">Настройка правил</button>
@@ -35,568 +25,221 @@
 
         <div class="pl-topbar-right">
             <div class="pl-topbar-indicator">
-                <div class="pl-dot"></div>
+                <span class="pl-indicator-dot"></span>
                 <span>Подключено</span>
             </div>
-            <div class="pl-topbar-datetime" id="pl-datetime"></div>
+            <span id="pl-now-datetime"></span>
         </div>
     </header>
 
-    <!-- Основной layout -->
-    <div class="pl-layout" id="pl-layout">
-        <!-- Левая панель: фильтры -->
-        <section class="pl-panel pl-sidebar-panel">
-            <div class="pl-panel-header">
-                <div class="pl-panel-title">Фильтры</div>
-            </div>
-            <div class="pl-panel-body">
-                <div class="pl-filters-inner">
-                    <div class="pl-filter-group">
-                        <label class="pl-filter-label" for="filter-status">Статус инцидента</label>
-                        <select id="filter-status" class="pl-select">
-                            <option value="">Все</option>
-                            <option value="new">Не обработано</option>
-                            <option value="in_progress">В работе</option>
-                            <option value="closed">Закрыто</option>
-                            <option value="false_positive">Ложное срабатывание</option>
-                        </select>
-                    </div>
+    <!-- ОСНОВНАЯ СЕТКА -->
+    <main class="pl-layout">
+        <!-- ЛЕВАЯ ПАНЕЛЬ: фильтры + правила -->
+        <aside class="pl-sidebar">
+            <section>
+                <div class="pl-section-title">Фильтры</div>
 
-                    <div class="pl-filter-group">
-                        <label class="pl-filter-label" for="filter-severity">Степень риска</label>
-                        <select id="filter-severity" class="pl-select">
-                            <option value="">Все</option>
-                            <option value="A">A — высокий</option>
-                            <option value="B">B — средний</option>
-                            <option value="C">C — низкий</option>
-                        </select>
-                    </div>
+                <div class="pl-field">
+                    <label class="pl-field-label" for="status-filter">Статус инцидента</label>
+                    <select id="status-filter" class="pl-select">
+                        <option value="">Все</option>
+                        <option value="new">Не обработано</option>
+                        <option value="in_progress">В работе</option>
+                        <option value="closed">Закрыто</option>
+                        <option value="false_positive">Ложное срабатывание</option>
+                    </select>
+                </div>
 
-                    <div class="pl-filter-group">
-                        <label class="pl-filter-label">Период</label>
-                        <input type="datetime-local" id="filter-from" class="pl-input" />
-                        <input type="datetime-local" id="filter-to" class="pl-input" />
-                    </div>
+                <div class="pl-field">
+                    <label class="pl-field-label" for="severity-filter">Степень риска</label>
+                    <select id="severity-filter" class="pl-select">
+                        <option value="">Все</option>
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                    </select>
+                </div>
 
-                    <div class="pl-filter-group">
-                        <label class="pl-filter-label" for="filter-shop">Магазин</label>
-                        <input type="text" id="filter-shop" class="pl-input" placeholder="например, 350" />
-                    </div>
+                <div class="pl-field">
+                    <label class="pl-field-label">Период</label>
+                    <input id="date-from" class="pl-input" type="date" />
+                    <div style="height:4px"></div>
+                    <input id="date-to" class="pl-input" type="date" />
+                </div>
 
-                    <div class="pl-filters-actions">
-                        <button class="pl-btn pl-btn--primary" id="btn-apply-filters">Применить</button>
-                        <button class="pl-btn" id="btn-reset-filters">Сброс</button>
-                    </div>
+                <div class="pl-field">
+                    <label class="pl-field-label" for="shop-filter">Магазин</label>
+                    <input id="shop-filter" class="pl-input" placeholder="например, 350" />
+                </div>
 
-                    <div class="pl-rules-list">
-                        <div class="pl-rules-list-title">Правила</div>
-                        <ul>
-                            <li>• BIG_ITEM_DISCOUNT</li>
-                            <li>• MANUAL_PRICE_SUSPECT</li>
-                            <li>• REFUND_RECEIPT</li>
-                            <li>• VOID_POSITION</li>
-                        </ul>
+                <div style="margin-top: 10px; display: flex; gap: 8px;">
+                    <button id="btn-apply" class="pl-btn pl-btn-primary" style="flex:1;">
+                        Применить
+                    </button>
+                    <button id="btn-reset" class="pl-btn pl-btn-secondary">
+                        Сброс
+                    </button>
+                </div>
+            </section>
+
+            <section>
+                <div class="pl-section-title">Правила</div>
+                <ul class="pl-rules-list" id="rules-list">
+                    <li>BIG_ITEM_DISCOUNT</li>
+                    <li>MANUAL_PRICE_SUSPECT</li>
+                    <li>REFUND_RECEIPT</li>
+                    <li>VOID_POSITION</li>
+                </ul>
+            </section>
+        </aside>
+
+        <!-- ЦЕНТР: видео + таймлайн -->
+        <section class="pl-main">
+            <div class="pl-video-card">
+                <div class="pl-video-header">
+                    <div>
+                        <div class="pl-video-title" id="rule-title">REFUND_RECEIPT</div>
+                        <div class="pl-video-meta" id="rule-meta">
+                            Магазин <span id="meta-shop">350</span>, касса
+                            <span id="meta-cash">1</span>, чек № <span id="meta-number">999</span>
+                        </div>
                     </div>
+                    <div class="pl-video-amount" id="rule-amount">
+                        -1000,00 ₸
+                    </div>
+                </div>
+
+                <div class="pl-video-placeholder">
+                    Здесь будет живое видео с кассы (Dahua / Hikvision / CSI).<br />
+                    Сейчас доступны только данные чека и события.
                 </div>
             </div>
-        </section>
 
-        <!-- Сплиттер слева -->
-        <div class="pl-splitter-vertical" data-split="left">
-            <div class="pl-splitter-handle"></div>
-        </div>
-
-        <!-- Центральная панель -->
-        <section class="pl-main-panel">
-            <div class="pl-main-grid" id="pl-main-grid">
-                <!-- Видео -->
-                <div class="pl-video-panel">
-                    <div class="pl-video-header">
-                        <div class="pl-video-title-block">
-                            <div class="pl-video-title" id="incident-title">Нет выбранного инцидента</div>
-                            <div class="pl-video-subtitle" id="incident-subtitle">
-                                Выберите инцидент в журнале ниже, чтобы просмотреть подробности.
-                            </div>
-                        </div>
-                        <div class="pl-video-amount" id="incident-amount"></div>
-                    </div>
-                    <div class="pl-video-body">
-                        <div class="pl-video-placeholder">
-                            <div class="pl-video-placeholder-inner">
-                                Здесь будет живое видео с кассы (Dahua / Hikvision / CSI).<br/>
-                                Сейчас доступны только данные чека и события.
-                            </div>
-                        </div>
-                    </div>
-                    <div class="pl-video-timeline">
-                        <div class="pl-video-timeline-top">
-                            <div class="pl-video-controls">
-                                <button class="pl-icon-btn">⏮</button>
-                                <button class="pl-icon-btn">⏪</button>
-                                <button class="pl-icon-btn">▶</button>
-                                <button class="pl-icon-btn">⏩</button>
-                                <button class="pl-icon-btn">⏭</button>
-                            </div>
-                            <div>Лента времени (макет)</div>
-                        </div>
-                        <div class="pl-timeline-slider">
-                            <div class="pl-timeline-slider-fill"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Сплиттер горизонтальный -->
-                <div class="pl-splitter-horizontal" data-split="horizontal">
-                    <div class="pl-splitter-handle"></div>
-                </div>
-
-                <!-- Журнал инцидентов -->
-                <div class="pl-journal-panel">
-                    <div class="pl-journal-header">
-                        <div class="pl-journal-counter">
-                            Журнал инцидентов <span id="journal-summary"></span>
-                        </div>
-                        <div>
-                            Магазин <span id="journal-filter-label">все</span>
-                        </div>
-                    </div>
-                    <div class="pl-journal-table-wrapper">
-                        <table>
-                            <thead>
-                            <tr>
-                                <th style="width:40px;">ID</th>
-                                <th style="width:48px;">Маг.</th>
-                                <th style="width:52px;">Касса</th>
-                                <th style="width:60px;">Чек</th>
-                                <th style="width:120px;">Дата/время</th>
-                                <th style="width:60px;">Риск</th>
-                                <th style="width:90px;">Статус</th>
-                                <th>События</th>
-                            </tr>
-                            </thead>
-                            <tbody id="incidents-tbody">
-                            <!-- строки подставляются через JS -->
-                            </tbody>
-                        </table>
-                    </div>
+            <div class="pl-timeline">
+                <span style="margin-right:8px;">Лента времени (макет)</span>
+                <div style="flex:1; height:4px; border-radius:999px; background:#151e27; border:1px solid var(--pl-border-soft); position:relative;">
+                    <span style="position:absolute; left:40%; top:-3px; width:8px; height:8px; border-radius:50%; background:var(--pl-accent);"></span>
                 </div>
             </div>
         </section>
 
-        <!-- Сплиттер справа -->
-        <div class="pl-splitter-vertical" data-split="right">
-            <div class="pl-splitter-handle"></div>
-        </div>
-
-        <!-- Правая панель: детали -->
-        <section class="pl-panel pl-details-panel">
-            <div class="pl-panel-header">
-                <div class="pl-panel-title">Детали инцидента</div>
-                <div class="pl-details-toolbar">
-                    <button class="pl-btn pl-btn--ghost" id="btn-prev-receipt">Предыдущий чек</button>
-                    <button class="pl-btn pl-btn--ghost" id="btn-next-receipt">Следующий чек</button>
-                </div>
-            </div>
-            <div class="pl-details-body">
-                <div class="pl-details-section" id="details-main">
-                    <div class="pl-details-section-header">Инцидент</div>
-                    <div class="pl-details-pairs">
-                        <div class="pl-details-key">Номер чека</div>
-                        <div class="pl-details-value" id="details-number">—</div>
-                        <div class="pl-details-key">Магазин / касса</div>
-                        <div class="pl-details-value" id="details-shop">—</div>
-                        <div class="pl-details-key">Дата / время</div>
-                        <div class="pl-details-value" id="details-time">—</div>
-                        <div class="pl-details-key">Риск</div>
-                        <div class="pl-details-value" id="details-risk">—</div>
-                        <div class="pl-details-key">Событий по чеку</div>
-                        <div class="pl-details-value" id="details-events-count">—</div>
-                    </div>
-                </div>
-
-                <div class="pl-details-section">
-                    <div class="pl-details-section-header">События по чеку</div>
-                    <div class="pl-details-tags" id="details-event-types">
-                        <!-- теги событий -->
-                    </div>
-                </div>
-
-                <div class="pl-details-section">
-                    <div class="pl-details-section-header">Комментарий СБ</div>
-                    <div class="pl-details-status-row">
-                        <div class="pl-status-select">
-                            <select id="details-status" class="pl-select">
-                                <option value="new">Не обработано</option>
-                                <option value="in_progress">В работе</option>
-                                <option value="closed">Закрыто</option>
-                                <option value="false_positive">Ложное срабатывание</option>
-                            </select>
+        <!-- ПРАВАЯ ПАНЕЛЬ: детали по чеку -->
+        <aside class="pl-details">
+            <header>
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div>
+                        <div class="pl-section-title">Чек</div>
+                        <div style="font-size:13px; font-weight:600;">
+                            Чек № <span id="detail-number">999</span>
                         </div>
-                        <button class="pl-btn pl-btn--primary" id="btn-save-status">Сохранить</button>
+                        <div style="font-size:11px; color:var(--pl-text-muted); margin-top:4px;">
+                            Магазин <span id="detail-shop">350</span>, касса
+                            <span id="detail-cash">1</span><br />
+                            <span id="detail-datetime">26.11.2025 10:38:08</span>
+                        </div>
                     </div>
-                    <textarea
-                            id="details-comment"
-                            class="pl-comment-textarea"
-                            placeholder="Опишите принятое решение..."
-                    ></textarea>
-                    <div class="pl-details-footer">
-                        <div id="details-updated">Обновлён: —</div>
-                        <div id="details-updated-by">Обновил: —</div>
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                        <button id="btn-decline" class="pl-btn pl-btn-secondary">Отклонить</button>
+                        <button id="btn-violation" class="pl-btn pl-btn-primary">Нарушение</button>
                     </div>
                 </div>
+            </header>
 
-                <div class="pl-details-section">
-                    <div class="pl-details-section-header">Действия</div>
-                    <div class="pl-details-toolbar">
-                        <button class="pl-btn pl-btn--danger">Нарушение</button>
-                        <button class="pl-btn pl-btn--ghost">Отклонить</button>
+            <section>
+                <div class="pl-section-title">Риск и статус</div>
+                <div style="display:flex; gap:8px; align-items:center; font-size:12px;">
+                    <span class="pl-severity-badge pl-severity-B" id="detail-severity">B</span>
+                    <span id="detail-status-label">Не обработано</span>
+                </div>
+            </section>
+
+            <section>
+                <div class="pl-section-title">События по чеку</div>
+                <div class="pl-events-list" id="events-list">
+                    <!-- сюда incidents.js подставит список событий -->
+                    <div class="pl-event-item">
+                        <div style="font-size:12px;">REFUND_RECEIPT</div>
+                        <div style="font-size:11px; color:var(--pl-text-muted);">
+                            cash: 1 · shop: 350 · shift: 999 · amount: -1000 · number: 999
+                        </div>
                     </div>
                 </div>
+            </section>
+
+            <section>
+                <div class="pl-section-title">Комментарий СБ</div>
+                <textarea id="security-comment" class="pl-input" rows="3"
+                          placeholder="Опишите принятое решение..."></textarea>
+            </section>
+
+            <footer style="margin-top:auto; display:flex; justify-content:space-between; font-size:11px; color:var(--pl-text-muted);">
+                <span>Обновил: <span id="detail-updated-by">security_ui</span></span>
+                <span id="detail-updated-at">26.11.2025, 13:03:38</span>
+            </footer>
+        </aside>
+
+        <!-- НИЖНЯЯ ТАБЛИЦА: журнал инцидентов -->
+        <section class="pl-bottom">
+            <header>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div class="pl-section-title">Журнал инцидентов</div>
+                        <div style="font-size:11px; color:var(--pl-text-muted);">
+                            Магазин <span id="list-shop">350</span>, касса
+                            <span id="list-cash">1</span>
+                        </div>
+                    </div>
+                    <div style="font-size:11px; color:var(--pl-text-muted);">
+                        Магазин: <span id="list-shop-filter-label">все</span>
+                    </div>
+                </div>
+            </header>
+
+            <div style="overflow:auto;">
+                <table class="pl-table" id="incidents-table">
+                    <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Маг.</th>
+                        <th>Касса</th>
+                        <th>Чек</th>
+                        <th>Дата/время</th>
+                        <th>Риск</th>
+                        <th>Статус</th>
+                        <th>События</th>
+                    </tr>
+                    </thead>
+                    <tbody id="incidents-tbody">
+                    <!-- Пример статических строк; потом incidents.js будет подставлять реальные -->
+                    <tr class="pl-table-row-active">
+                        <td>4</td>
+                        <td>350</td>
+                        <td>1</td>
+                        <td>999</td>
+                        <td>26.11.2025 10:38:08</td>
+                        <td><span class="pl-severity-badge pl-severity-B">B</span></td>
+                        <td>Не обработано</td>
+                        <td>REFUND_RECEIPT</td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td>350</td>
+                        <td>1</td>
+                        <td>99999</td>
+                        <td>25.11.2025 14:30:00</td>
+                        <td><span class="pl-severity-badge pl-severity-A">A</span></td>
+                        <td>В работе</td>
+                        <td>BIG_ITEM_DISCOUNT, MANUAL_PRICE_SUSPECT, VOID_POSITION</td>
+                    </tr>
+                    </tbody>
+                </table>
             </div>
         </section>
-    </div>
+    </main>
 </div>
 
-<script>
-    // ===== Вспомогательные функции =====
-    function formatDateTime(dtString) {
-        if (!dtString) return "—";
-        try {
-            const dt = new Date(dtString);
-            const date = dt.toLocaleDateString("ru-RU");
-            const time = dt.toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit", second: "2-digit"});
-            return date + " " + time;
-        } catch {
-            return dtString;
-        }
-    }
-
-    function severityBadge(sev) {
-        const s = (sev || "").toUpperCase();
-        const cls = s === "A" ? "pl-risk-A" : s === "B" ? "pl-risk-B" : "pl-risk-C";
-        return `<span class="pl-risk-badge ${cls}">${s || "-"}</span>`;
-    }
-
-    function statusLabel(status) {
-        switch (status) {
-            case "new": return "Не обработано";
-            case "in_progress": return "В работе";
-            case "closed": return "Закрыто";
-            case "false_positive": return "Ложное срабатывание";
-            default: return status || "—";
-        }
-    }
-
-    function statusClass(status) {
-        switch (status) {
-            case "new": return "pl-status-pill pl-status-pill--new";
-            case "in_progress": return "pl-status-pill pl-status-pill--in-progress";
-            case "closed": return "pl-status-pill pl-status-pill--closed";
-            default: return "pl-status-pill";
-        }
-    }
-
-    // ===== Глобальное состояние =====
-    const state = {
-        incidents: [],
-        selectedIncidentId: null
-    };
-
-    // ===== Загрузка инцидентов =====
-    async function loadIncidents() {
-        const params = new URLSearchParams();
-        params.set("limit", "200");
-
-        const sev = document.getElementById("filter-severity").value;
-        const status = document.getElementById("filter-status").value;
-        const shop = document.getElementById("filter-shop").value.trim();
-
-        if (sev) params.set("severity", sev);
-        if (status) params.set("status", status);
-        if (shop) params.set("shop", shop);
-
-        const from = document.getElementById("filter-from").value;
-        const to = document.getElementById("filter-to").value;
-        if (from) params.set("date_from", from);
-        if (to) params.set("date_to", to);
-
-        const res = await fetch(`/api/v1/incidents?${params.toString()}`);
-        if (!res.ok) {
-            console.error("Ошибка загрузки инцидентов", await res.text());
-            return;
-        }
-        const data = await res.json();
-        state.incidents = data.items || [];
-        renderIncidentsTable();
-    }
-
-    function renderIncidentsTable() {
-        const tbody = document.getElementById("incidents-tbody");
-        tbody.innerHTML = "";
-
-        const shopFilterValue = document.getElementById("filter-shop").value.trim();
-        document.getElementById("journal-filter-label").textContent = shopFilterValue || "все";
-        document.getElementById("journal-summary").textContent = state.incidents.length
-            ? `(${state.incidents.length})`
-            : "";
-
-        state.incidents.forEach(incident => {
-            const tr = document.createElement("tr");
-            tr.dataset.id = incident.id;
-
-            const saleTime = formatDateTime(incident.sale_time);
-            const sevBadge = severityBadge(incident.severity);
-            const stLabel = statusLabel(incident.status);
-            const stClass = statusClass(incident.status);
-
-            tr.innerHTML = `
-                <td>${incident.id}</td>
-                <td>${incident.shop || "-"}</td>
-                <td>${incident.cash || "-"}</td>
-                <td>${incident.number || "-"}</td>
-                <td>${saleTime}</td>
-                <td>${sevBadge}</td>
-                <td><span class="${stClass}">${stLabel}</span></td>
-                <td>${(incident.event_types || []).join(", ")}</td>
-            `;
-
-            tr.addEventListener("click", () => {
-                selectIncident(incident.id);
-            });
-
-            tbody.appendChild(tr);
-        });
-
-        // auto-select first
-        if (state.incidents.length && !state.selectedIncidentId) {
-            selectIncident(state.incidents[0].id);
-        } else {
-            highlightSelectedRow();
-        }
-    }
-
-    function highlightSelectedRow() {
-        const rows = document.querySelectorAll("#incidents-tbody tr");
-        rows.forEach(row => {
-            if (Number(row.dataset.id) === state.selectedIncidentId) {
-                row.classList.add("pl-row-selected");
-            } else {
-                row.classList.remove("pl-row-selected");
-            }
-        });
-    }
-
-    // ===== Загрузка деталей инцидента =====
-    async function selectIncident(id) {
-        state.selectedIncidentId = Number(id);
-        highlightSelectedRow();
-
-        const res = await fetch(`/api/v1/incidents/${id}`);
-        if (!res.ok) {
-            console.error("Ошибка загрузки инцидента", await res.text());
-            return;
-        }
-        const data = await res.json();
-        const {incident, events} = data;
-
-        // Видео шапка
-        document.getElementById("incident-title").textContent = incident.event_types?.[0] || "Инцидент";
-        document.getElementById("incident-subtitle").textContent =
-            `Магазин ${incident.shop || "-"}, касса ${incident.cash || "-"}, чек № ${incident.number || "-"}`;
-        document.getElementById("incident-amount").textContent = "";
-
-        // Основные детали
-        document.getElementById("details-number").textContent = incident.number || "-";
-        document.getElementById("details-shop").textContent =
-            `${incident.shop || "-"}, касса ${incident.cash || "-"}`;
-        document.getElementById("details-time").textContent = formatDateTime(incident.sale_time);
-        document.getElementById("details-risk").innerHTML = severityBadge(incident.severity);
-        document.getElementById("details-events-count").textContent = incident.events_count ?? "-";
-
-        // Теги событий
-        const tags = document.getElementById("details-event-types");
-        tags.innerHTML = "";
-        (incident.event_types || []).forEach(t => {
-            const span = document.createElement("span");
-            span.className = "pl-event-tag";
-            span.textContent = t;
-            tags.appendChild(span);
-        });
-
-        // Статус + комментарий
-        document.getElementById("details-status").value = incident.status || "new";
-        document.getElementById("details-comment").value = incident.last_comment || "";
-        document.getElementById("details-updated").textContent =
-            "Обновлён: " + formatDateTime(incident.updated_at);
-        document.getElementById("details-updated-by").textContent =
-            "Обновил: " + (incident.updated_by || "—");
-    }
-
-    // ===== Сохранение статуса =====
-    async function saveStatus() {
-        if (!state.selectedIncidentId) return;
-
-        const status = document.getElementById("details-status").value;
-        const comment = document.getElementById("details-comment").value;
-        const payload = {
-            status,
-            comment,
-            updated_by: "security_ui"
-        };
-
-        const res = await fetch(`/api/v1/incidents/${state.selectedIncidentId}/status`, {
-            method: "PATCH",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify(payload)
-        });
-
-        if (!res.ok) {
-            alert("Ошибка при сохранении статуса");
-            console.error(await res.text());
-            return;
-        }
-
-        const incident = await res.json();
-
-        document.getElementById("details-updated").textContent =
-            "Обновлён: " + formatDateTime(incident.updated_at);
-        document.getElementById("details-updated-by").textContent =
-            "Обновил: " + (incident.updated_by || "—");
-
-        // обновим строку в таблице без полной перезагрузки
-        const idx = state.incidents.findIndex(i => i.id === incident.id);
-        if (idx !== -1) {
-            state.incidents[idx] = {...state.incidents[idx], ...incident};
-            renderIncidentsTable();
-        }
-    }
-
-    // ===== Сплиттеры (настройка размеров) =====
-    function initSplitters() {
-        const layout = document.getElementById("pl-layout");
-        const mainGrid = document.getElementById("pl-main-grid");
-        let drag = null;
-
-        function onMouseMove(e) {
-            if (!drag) return;
-
-            if (drag.type === "left") {
-                const dx = e.clientX - drag.startX;
-                let newSidebar = drag.startSidebar + dx;
-                if (newSidebar < 200) newSidebar = 200;
-                if (newSidebar > 480) newSidebar = 480;
-                document.documentElement.style.setProperty("--sidebar-width", newSidebar + "px");
-            } else if (drag.type === "right") {
-                const dx = drag.startX - e.clientX;
-                let newDetails = drag.startDetails + dx;
-                if (newDetails < 260) newDetails = 260;
-                if (newDetails > 520) newDetails = 520;
-                document.documentElement.style.setProperty("--details-width", newDetails + "px");
-            } else if (drag.type === "horizontal") {
-                const dy = e.clientY - drag.startY;
-                let newJournal = drag.startJournal - dy;
-                if (newJournal < 150) newJournal = 150;
-                if (newJournal > 400) newJournal = 400;
-                document.documentElement.style.setProperty("--journal-min-height", newJournal + "px");
-            }
-        }
-
-        function onMouseUp() {
-            drag = null;
-            document.body.style.cursor = "";
-        }
-
-        layout.addEventListener("mousedown", (e) => {
-            const target = e.target.closest(".pl-splitter-vertical, .pl-splitter-horizontal");
-            if (!target) return;
-
-            const splitType = target.dataset.split;
-            if (splitType === "left") {
-                drag = {
-                    type: "left",
-                    startX: e.clientX,
-                    startSidebar: parseFloat(getComputedStyle(document.documentElement)
-                        .getPropertyValue("--sidebar-width"))
-                };
-                document.body.style.cursor = "col-resize";
-            } else if (splitType === "right") {
-                drag = {
-                    type: "right",
-                    startX: e.clientX,
-                    startDetails: parseFloat(getComputedStyle(document.documentElement)
-                        .getPropertyValue("--details-width"))
-                };
-                document.body.style.cursor = "col-resize";
-            } else if (splitType === "horizontal") {
-                drag = {
-                    type: "horizontal",
-                    startY: e.clientY,
-                    startJournal: parseFloat(getComputedStyle(document.documentElement)
-                        .getPropertyValue("--journal-min-height"))
-                };
-                document.body.style.cursor = "row-resize";
-            }
-        });
-
-        window.addEventListener("mousemove", onMouseMove);
-        window.addEventListener("mouseup", onMouseUp);
-    }
-
-    // ===== Верхний таймер времени =====
-    function startClock() {
-        const el = document.getElementById("pl-datetime");
-        function tick() {
-            const now = new Date();
-            const date = now.toLocaleDateString("ru-RU");
-            const time = now.toLocaleTimeString("ru-RU");
-            el.textContent = date + " · " + time;
-        }
-        tick();
-        setInterval(tick, 1000);
-    }
-
-    // ===== Навигация по чекам (просто по списку) =====
-    function selectRelative(offset) {
-        if (!state.incidents.length) return;
-        if (!state.selectedIncidentId) {
-            selectIncident(state.incidents[0].id);
-            return;
-        }
-        const idx = state.incidents.findIndex(i => i.id === state.selectedIncidentId);
-        if (idx === -1) return;
-        let newIndex = idx + offset;
-        if (newIndex < 0) newIndex = 0;
-        if (newIndex >= state.incidents.length) newIndex = state.incidents.length - 1;
-        selectIncident(state.incidents[newIndex].id);
-    }
-
-    // ===== Инициализация =====
-    window.addEventListener("DOMContentLoaded", () => {
-        startClock();
-        initSplitters();
-        loadIncidents();
-
-        document.getElementById("btn-apply-filters")
-            .addEventListener("click", loadIncidents);
-
-        document.getElementById("btn-reset-filters")
-            .addEventListener("click", () => {
-                document.getElementById("filter-status").value = "";
-                document.getElementById("filter-severity").value = "";
-                document.getElementById("filter-shop").value = "";
-                document.getElementById("filter-from").value = "";
-                document.getElementById("filter-to").value = "";
-                loadIncidents();
-            });
-
-        document.getElementById("btn-save-status")
-            .addEventListener("click", saveStatus);
-
-        document.getElementById("btn-prev-receipt")
-            .addEventListener("click", () => selectRelative(-1));
-        document.getElementById("btn-next-receipt")
-            .addEventListener("click", () => selectRelative(1));
-    });
-</script>
+<script src="/static/incidents.js"></script>
 </body>
+
+
 </html>

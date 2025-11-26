@@ -13,17 +13,20 @@ from app.api import receipts, incidents, ui_incidents
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("prismalite")
 
-# === БАЗОВЫЕ ПУТИ ===
-BASE_DIR = Path(__file__).resolve().parent  # backend/app
+# === БАЗОВЫЙ КАТАЛОГ app ===
+# => D:\PrismaLite\backend\app
+BASE_DIR = Path(__file__).resolve().parent
+
+# === ПАПКА UI ДЛЯ ИНЦИДЕНТОВ ===
+# => D:\PrismaLite\backend\app\ui\incidents
+UI_INCIDENTS_DIR = BASE_DIR / "ui" / "incidents"
 
 app = FastAPI(title="PrismaLite Backend")
 
-# === СТАТИКА ДЛЯ UI (CSS / JS / картинки) ===
-# файлы берём из backend/app/ui/*
-# и отдаём по урлу /static/...
+# === СТАТИКА ДЛЯ UI (CSS/JS), КОРЕНЬ = ui/incidents ===
 app.mount(
     "/static",
-    StaticFiles(directory=str(BASE_DIR / "ui")),
+    StaticFiles(directory=str(UI_INCIDENTS_DIR)),
     name="static",
 )
 
@@ -34,7 +37,7 @@ app.include_router(incidents_router, prefix="/api/v1")
 app.include_router(receipts.router, prefix="/api/v1")
 app.include_router(incidents.router, prefix="/api/v1")
 
-# UI роутер (страница /ui/incidents и т.п.)
+# UI роутер (страница /ui/incidents)
 app.include_router(ui_incidents.router)
 
 # SetRetail integration
