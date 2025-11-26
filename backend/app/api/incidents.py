@@ -1,72 +1,116 @@
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
+
+from enum import Enum
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from app.db.connection import get_connection
 
-router = APIRouter(prefix="/incidents", tags=["incidents"])
+router = APIRouter(tags=["incidents"])
 
 
-@router.get("")
+# ============================
+#   МОДЕЛИ ДЛЯ API
+# ============================
+
+class IncidentStatus(str, Enum):
+    new = "new"
+    in_progress = "in_progress"
+    closed = "closed"
+    false_positive = "false_positive"
+
+
+class IncidentStatusUpdate(BaseModel):
+    status: IncidentStatus
+    comment: Optional[str] = None
+    updated_by: Optional[str] = None
+
+
+# ============================
+#   СПИСОК ИНЦИДЕНТОВ
+# ============================
+
+@router.get("/incidents")
 def list_incidents(
     severity: Optional[List[str]] = Query(
-        None,
-        description="Фильтр по severity (A/B/C). Можно несколько: ?severity=A&severity=B",
+        default=None,
+        description="Фильтр по severity: A/B/C"
     ),
     status: Optional[List[str]] = Query(
-        None,
-        description="Фильтр по статусу (new/in_progress/...). Можно несколько",
+        default=None,
+        description="Фильтр по статусу: new/in_progress/closed/false_positive"
     ),
     shop: Optional[str] = Query(
-        None,
-        description="Фильтр по магазину (поле incidents.shop)",
+        default=None,
+        description="Фильтр по магазину"
     ),
     date_from: Optional[datetime] = Query(
-        None,
-        description="Отбор по sale_time >= date_from",
+        default=None,
+        description="Начало периода по sale_time"
     ),
     date_to: Optional[datetime] = Query(
-        None,
-        description="Отбор по sale_time <= date_to",
+        default=None,
+        description="Конец периода по sale_time (включительно)"
     ),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
     """
-    Список инцидентов для службы безопасности.
-    Возвращает краткую информацию без вложенных событий.
+    Список инцидентов с фильтрами.
+
+    Возвращает:
+    - список инцидентов
+    - total — общее количество с учётом фильтров (для пагинации)
     """
     conn = get_connection()
     try:
-        where_clauses = []
-        params: List[Any] = []
+        cur = conn.cursor()
 
+        where_clauses = ["1=1"]
+        params: List = []
+
+        # severity[]
         if severity:
             where_clauses.append("severity = ANY(%s)")
             params.append(severity)
 
+        # status[]
         if status:
             where_clauses.append("status = ANY(%s)")
             params.append(status)
 
+        # магазин
         if shop:
             where_clauses.append("shop = %s")
             params.append(shop)
 
+        # период по sale_time
         if date_from:
             where_clauses.append("sale_time >= %s")
             params.append(date_from)
-
         if date_to:
+            # делаем <=, а не <, чтобы включить конец дня
             where_clauses.append("sale_time <= %s")
             params.append(date_to)
 
-        where_sql = ""
-        if where_clauses:
-            where_sql = "WHERE " + " AND ".join(where_clauses)
+        where_sql = " AND ".join(where_clauses)
 
-        sql = f"""
+        # total
+        cur.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM prismalite.incidents
+            WHERE {where_sql}
+            """,
+            params,
+        )
+        total = cur.fetchone()[0]
+
+        # данные
+        cur.execute(
+            f"""
             SELECT
                 id,
                 receipt_id,
@@ -79,36 +123,39 @@ def list_incidents(
                 sale_time,
                 event_types,
                 events_count,
+                video_from,
+                video_to,
                 created_at,
                 updated_at
-            FROM incidents
-            {where_sql}
+            FROM prismalite.incidents
+            WHERE {where_sql}
             ORDER BY sale_time DESC, id DESC
             LIMIT %s OFFSET %s
-        """
+            """,
+            params + [limit, offset],
+        )
+        rows = cur.fetchall()
 
-        params.extend([limit, offset])
+        incidents = []
+        for row in rows:
+            (
+                id_,
+                receipt_id,
+                severity_,
+                status_,
+                shop_,
+                cash_,
+                shift_,
+                number_,
+                sale_time_,
+                event_types,
+                events_count,
+                video_from,
+                video_to,
+                created_at,
+                updated_at,
+            ) = row
 
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            rows = cur.fetchall()
-
-        incidents: List[Dict[str, Any]] = []
-        for (
-            id_,
-            receipt_id,
-            severity_,
-            status_,
-            shop_,
-            cash_,
-            shift_,
-            number_,
-            sale_time_,
-            event_types,
-            events_count,
-            created_at,
-            updated_at,
-        ) in rows:
             incidents.append(
                 {
                     "id": id_,
@@ -122,125 +169,252 @@ def list_incidents(
                     "sale_time": sale_time_,
                     "event_types": event_types or [],
                     "events_count": events_count,
+                    "video_from": video_from,
+                    "video_to": video_to,
                     "created_at": created_at,
                     "updated_at": updated_at,
                 }
             )
 
-        return incidents
+        return {
+            "items": incidents,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     finally:
         conn.close()
 
 
-@router.get("/{incident_id}")
+# ============================
+#   ДЕТАЛЬНЫЙ ИНЦИДЕНТ + СОБЫТИЯ
+# ============================
+
+@router.get("/incidents/{incident_id}")
 def get_incident(incident_id: int):
     """
     Детальная карточка инцидента:
-    - сам инцидент
-    - все связанные события (через incident_events)
+    - данные из prismalite.incidents
+    - events[] — связанные события
     """
     conn = get_connection()
     try:
-        with conn.cursor() as cur:
-            # 1. инцидент
-            cur.execute(
-                """
-                SELECT
-                    id,
-                    receipt_id,
-                    severity,
-                    status,
-                    shop,
-                    cash,
-                    shift,
-                    number,
-                    sale_time,
-                    event_types,
-                    events_count,
-                    created_at,
-                    updated_at
-                FROM incidents
-                WHERE id = %s
-                """,
-                (incident_id,),
-            )
-            row = cur.fetchone()
+        cur = conn.cursor()
 
-            if not row:
-                raise HTTPException(status_code=404, detail="Incident not found")
-
-            (
-                id_,
+        # сам инцидент
+        cur.execute(
+            """
+            SELECT
+                id,
                 receipt_id,
-                severity_,
-                status_,
-                shop_,
-                cash_,
-                shift_,
-                number_,
-                sale_time_,
+                severity,
+                status,
+                shop,
+                cash,
+                shift,
+                number,
+                sale_time,
                 event_types,
                 events_count,
+                video_from,
+                video_to,
+                video_meta,
                 created_at,
-                updated_at,
-            ) = row
+                updated_at
+            FROM prismalite.incidents
+            WHERE id = %s
+            """,
+            (incident_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="incident not found")
 
-            incident: Dict[str, Any] = {
-                "id": id_,
-                "receipt_id": receipt_id,
-                "severity": severity_,
-                "status": status_,
-                "shop": shop_,
-                "cash": cash_,
-                "shift": shift_,
-                "number": number_,
-                "sale_time": sale_time_,
-                "event_types": event_types or [],
-                "events_count": events_count,
-                "created_at": created_at,
-                "updated_at": updated_at,
-            }
+        (
+            id_,
+            receipt_id,
+            severity_,
+            status_,
+            shop_,
+            cash_,
+            shift_,
+            number_,
+            sale_time_,
+            event_types,
+            events_count,
+            video_from,
+            video_to,
+            video_meta,
+            created_at,
+            updated_at,
+        ) = row
 
-            # 2. события по инциденту
-            cur.execute(
-                """
-                SELECT
-                    e.id,
-                    e.position_id,
-                    e.event_type,
-                    e.severity,
-                    e.created_at,
-                    e.details
-                FROM incident_events ie
-                JOIN events e ON e.id = ie.event_id
-                WHERE ie.incident_id = %s
-                ORDER BY e.created_at, e.id
-                """,
-                (incident_id,),
-            )
-            events_rows = cur.fetchall()
+        incident = {
+            "id": id_,
+            "receipt_id": receipt_id,
+            "severity": severity_,
+            "status": status_,
+            "shop": shop_,
+            "cash": cash_,
+            "shift": shift_,
+            "number": number_,
+            "sale_time": sale_time_,
+            "event_types": event_types or [],
+            "events_count": events_count,
+            "video_from": video_from,
+            "video_to": video_to,
+            "video_meta": video_meta,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
 
-        events: List[Dict[str, Any]] = []
+        # связанные события
+        cur.execute(
+            """
+            SELECT
+                e.id,
+                e.event_type,
+                e.severity,
+                e.created_at,
+                e.details
+            FROM prismalite.incident_events ie
+            JOIN prismalite.events e ON e.id = ie.event_id
+            WHERE ie.incident_id = %s
+            ORDER BY e.created_at ASC, e.id ASC
+            """,
+            (incident_id,),
+        )
+        events = []
         for (
-            e_id,
-            position_id,
-            event_type,
-            severity_e,
-            created_at_e,
-            details,
-        ) in events_rows:
+            ev_id,
+            ev_type,
+            ev_severity,
+            ev_created_at,
+            ev_details,
+        ) in cur.fetchall():
             events.append(
                 {
-                    "id": e_id,
-                    "position_id": position_id,
-                    "event_type": event_type,
-                    "severity": severity_e,
-                    "created_at": created_at_e,
-                    "details": details or {},
+                    "id": ev_id,
+                    "event_type": ev_type,
+                    "severity": ev_severity,
+                    "created_at": ev_created_at,
+                    "details": ev_details,
                 }
             )
 
-        incident["events"] = events
-        return incident
+        return {"incident": incident, "events": events}
+    finally:
+        conn.close()
+
+
+# ============================
+#   СМЕНА СТАТУСА ИНЦИДЕНТА
+# ============================
+
+@router.patch("/incidents/{incident_id}/status")
+def update_incident_status(
+    incident_id: int,
+    payload: IncidentStatusUpdate,
+):
+    """
+    Смена статуса инцидента:
+    - status: new / in_progress / closed / false_positive
+    - comment: опциональный комментарий
+    - updated_by: кто изменил (логин / ФИО)
+
+    Требует столбцы:
+      - status incident_status NOT NULL
+      - updated_at timestamptz
+      - last_comment text NULL
+      - updated_by text NULL
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            UPDATE prismalite.incidents
+            SET
+                status = %s,
+                updated_at = NOW(),
+                last_comment = COALESCE(%s, last_comment),
+                updated_by = COALESCE(%s, updated_by)
+            WHERE id = %s
+            RETURNING
+                id,
+                receipt_id,
+                severity,
+                status,
+                shop,
+                cash,
+                shift,
+                number,
+                sale_time,
+                event_types,
+                events_count,
+                video_from,
+                video_to,
+                video_meta,
+                created_at,
+                updated_at,
+                last_comment,
+                updated_by
+            """,
+            (
+                payload.status.value,
+                payload.comment,
+                payload.updated_by,
+                incident_id,
+            ),
+        )
+
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="incident not found")
+
+        (
+            id_,
+            receipt_id,
+            severity_,
+            status_,
+            shop_,
+            cash_,
+            shift_,
+            number_,
+            sale_time_,
+            event_types,
+            events_count,
+            video_from,
+            video_to,
+            video_meta,
+            created_at,
+            updated_at,
+            last_comment,
+            updated_by,
+        ) = row
+
+        conn.commit()
+
+        return {
+            "id": id_,
+            "receipt_id": receipt_id,
+            "severity": severity_,
+            "status": status_,
+            "shop": shop_,
+            "cash": cash_,
+            "shift": shift_,
+            "number": number_,
+            "sale_time": sale_time_,
+            "event_types": event_types or [],
+            "events_count": events_count,
+            "video_from": video_from,
+            "video_to": video_to,
+            "video_meta": video_meta,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "last_comment": last_comment,
+            "updated_by": updated_by,
+        }
     finally:
         conn.close()
